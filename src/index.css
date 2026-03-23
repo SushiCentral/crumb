@@ -1,0 +1,23 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    background: #1e1e1e;
+}
+
+/* Make CodeMirror fill its container */
+.cm-editor {
+    height: 100%;
+}
+
+.cm-scroller {
+    overflow: auto;
+}
