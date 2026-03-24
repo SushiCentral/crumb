@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import Terminal from './Terminal';
 import OutputPanel from './OutputPanel';
 import ProblemsPanel from './ProblemsPanel';
