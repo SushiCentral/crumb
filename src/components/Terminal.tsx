@@ -14,10 +14,12 @@ export default function Terminal() {
 
     // Initialize xterm.js
     const term = new XTerm({
-      fontFamily: '"Fira Code", monospace',
-      fontSize: 14,
+      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+      fontSize: 13,
       theme: {
         background: '#1e1e1e',
+        foreground: '#cccccc',
+        cursor: '#ffffff',
       },
       cursorBlink: true,
     });

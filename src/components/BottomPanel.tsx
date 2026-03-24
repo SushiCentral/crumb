@@ -3,7 +3,11 @@ import Terminal from './Terminal';
 import OutputPanel from './OutputPanel';
 import ProblemsPanel from './ProblemsPanel';
 
-export default function BottomPanel() {
+interface BottomPanelProps {
+  onClose?: () => void;
+}
+
+export default function BottomPanel({ onClose }: BottomPanelProps) {
   const [activeTab, setActiveTab] = useState<'terminal' | 'output' | 'problems'>('terminal');
 
   return (
@@ -26,6 +30,17 @@ export default function BottomPanel() {
           onClick={() => setActiveTab('terminal')}
         >
           Terminal
+        </button>
+
+        <div style={{ flex: 1 }} />
+        
+        {/* Close Button UI */}
+        <button 
+          className="tab-btn close-btn" 
+          onClick={onClose}
+          title="Close Panel (⌘J / Ctrl+J)"
+        >
+          ✕
         </button>
       </div>
       <div className="tab-content">
