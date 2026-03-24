@@ -1,6 +1,64 @@
 import { useEffect, useRef } from "react";
 import { EditorView, basicSetup } from "codemirror";
 import { EditorState } from "@codemirror/state";
+import { oneDarkTheme } from "@codemirror/theme-one-dark";
+import { javascript } from "@codemirror/lang-javascript";
+import { zedSyntaxHighlighting } from "../lib/highlight"; // add this
+
+const zedStyleOverrides = EditorView.theme({
+    "&": {
+        backgroundColor: "#1c1c1c",
+        color: "#d4d4d4",
+        fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+        fontSize: "13.5px",
+        lineHeight: "1.6",
+    },
+    ".cm-scroller": {
+        overflow: "auto",
+        fontFamily: "inherit",
+    },
+    ".cm-gutters": {
+        backgroundColor: "#1c1c1c",
+        borderRight: "none",
+        paddingRight: "12px",
+        color: "#4a4a4a",
+    },
+    ".cm-activeLineGutter": {
+        backgroundColor: "transparent",
+        color: "#a0a0a0",
+    },
+    ".cm-activeLine": {
+        backgroundColor: "#252525",
+    },
+    ".cm-selectionBackground, ::selection": {
+        backgroundColor: "#2a3f5f !important",
+    },
+    ".cm-cursor": {
+        borderLeftColor: "#528bff",
+        borderLeftWidth: "2px",
+    },
+    "&.cm-focused": {
+        outline: "none",
+    },
+    ".cm-matchingBracket": {
+        backgroundColor: "#3a3a3a",
+        outline: "none",
+    },
+    ".cm-scroller::-webkit-scrollbar": {
+        width: "6px",
+        height: "6px",
+    },
+    ".cm-scroller::-webkit-scrollbar-track": {
+        background: "transparent",
+    },
+    ".cm-scroller::-webkit-scrollbar-thumb": {
+        background: "#3a3a3a",
+        borderRadius: "3px",
+    },
+    ".cm-scroller::-webkit-scrollbar-thumb:hover": {
+        background: "#4a4a4a",
+    },
+});
 
 export default function Editor() {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -11,7 +69,13 @@ export default function Editor() {
 
         const state = EditorState.create({
             doc: `// Welcome to Horizon\n\nfunction hello() {\n  console.log("Hello, world!");\n}\n`,
-            extensions: [basicSetup],
+            extensions: [
+                zedSyntaxHighlighting, // Move to top for highest precedence
+                zedStyleOverrides,
+                basicSetup,
+                javascript(),
+                oneDarkTheme,
+            ],
         });
 
         const view = new EditorView({

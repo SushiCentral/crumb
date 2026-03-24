@@ -10,10 +10,9 @@ body,
     height: 100%;
     width: 100%;
     overflow: hidden;
-    background: #1e1e1e;
+    background: #1c1c1c;
 }
 
-/* Make CodeMirror fill its container */
 .cm-editor {
     height: 100%;
 }
