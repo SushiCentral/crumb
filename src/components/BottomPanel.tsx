@@ -1,41 +1,44 @@
 import { useState, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import Terminal from './Terminal';
 import OutputPanel from './OutputPanel';
 import ProblemsPanel from './ProblemsPanel';
 
-// --- SVG Icons for Terminal Actions ---
+// --- SVG Icons for Terminal Actions (VS Code Codicons) ---
 const PlusIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-    <path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+    <path d="M14 7v1H8v6H7V8H1V7h6V1h1v6h6z"/>
   </svg>
 );
 
 const SplitIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-    <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.5" fill="none" />
-    <path d="M8 3v10" stroke="currentColor" strokeWidth="1.5" />
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+    <path fillRule="evenodd" clipRule="evenodd" d="M2.5 3A1.5 1.5 0 0 0 1 4.5v7A1.5 1.5 0 0 0 2.5 13h11a1.5 1.5 0 0 0 1.5-1.5v-7A1.5 1.5 0 0 0 13.5 3h-11zM2 4.5C2 4.22 2.22 4 2.5 4h4.5v8H2.5A.5.5 0 0 1 2 11.5v-7zm6 7.5V4h5.5a.5.5 0 0 1 .5.5v7a.5.5 0 0 1-.5.5H8z"/>
   </svg>
 );
 
 const TrashIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-    <path d="M5 5v5M8 5v5M11 5v5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    <path d="M3 4h10M6 4V2.5C6 2.22 6.22 2 6.5 2h3c.28 0 .5.22 .5.5V4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-    <path d="M4 4h8v8.5c0 .83-.67 1.5-1.5 1.5h-5A1.5 1.5 0 0 1 4 12.5V4z" stroke="currentColor" strokeWidth="1.5" fill="none" />
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+    <path fillRule="evenodd" clipRule="evenodd" d="M11 3h3v1h-1v9l-1 1H4l-1-1V4H2V3h3V2a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1zM6 2v1h4V2H6zm5 2H5v9h6V4z"/>
+    <path fillRule="evenodd" clipRule="evenodd" d="M6 6h1v5H6zM9 6h1v5H9z"/>
+  </svg>
+);
+
+const MoreIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+    <path d="M4 8a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm5 0a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm5 0a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/>
   </svg>
 );
 
 const CloseIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-    <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+    <path d="M8.7 8l3.65-3.65-.7-.7L8 7.3 4.35 3.65l-.7.7L7.3 8l-3.65 3.65.7.7L8 8.7l3.65 3.65.7-.7L8.7 8z"/>
   </svg>
 );
 
 const TerminalIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-    <path d="M4 4l3 3-3 3v1.5l4.5-4.5L4 2.5V4zm5 6h4v1.5H9V10z" />
-    <path d="M1 1h14v14H1V1zm1 1v12h12V2H2z" />
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+    <path fillRule="evenodd" clipRule="evenodd" d="M14 3H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1zm0 1v8H2V4h12z"/>
+    <path fillRule="evenodd" clipRule="evenodd" d="M3.707 5.707L1.414 8l2.293 2.293.707-.707L2.828 8l1.586-1.586-.707-.707zM7 10h4v1H7v-1z"/>
   </svg>
 );
 
@@ -67,7 +70,7 @@ export default function BottomPanel({ onClose }: BottomPanelProps) {
   };
 
   const handleKillTerminal = () => {
-    invoke('kill_pty', { id: activeTerminalId }).catch(console.error);
+    // Note: the backend Rust kill_pty is robustly handled by Terminal.tsx's unmount cleanup hook.
     const nextList = terminals.filter(t => t.id !== activeTerminalId);
     
     // Clean up title memory
@@ -81,7 +84,10 @@ export default function BottomPanel({ onClose }: BottomPanelProps) {
       setTerminals(nextList);
       setActiveTerminalId(nextList[nextList.length - 1].id);
     } else {
-      // Auto-spawn a new terminal if all are killed
+      // Gracefully close the entire bottom panel if the final terminal is killed
+      if (onClose) onClose();
+      
+      // Auto-restart a fresh standby shell while hidden, ensuring the toggle shortcut has a terminal ready
       const newId = `term-${Date.now()}`;
       setTerminals([{ id: newId }]);
       setActiveTerminalId(newId);
@@ -123,6 +129,9 @@ export default function BottomPanel({ onClose }: BottomPanelProps) {
             </button>
             <button className="icon-btn" title="Kill Terminal" onClick={handleKillTerminal}>
               <TrashIcon />
+            </button>
+            <button className="icon-btn" title="More Actions...">
+              <MoreIcon />
             </button>
             <div className="divider" />
           </div>
