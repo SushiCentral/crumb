@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import Terminal from './Terminal';
 import OutputPanel from './OutputPanel';
 import ProblemsPanel from './ProblemsPanel';
@@ -35,6 +36,12 @@ const CloseIcon = () => (
   </svg>
 );
 
+const ChevronDownIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+    <path fillRule="evenodd" clipRule="evenodd" d="M7.976 10.072l4.357-4.357.62.618L8.284 11h-.618L3 6.333l.619-.618 4.357 4.357z"/>
+  </svg>
+);
+
 const TerminalIcon = () => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
     <path fillRule="evenodd" clipRule="evenodd" d="M14 3H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1zm0 1v8H2V4h12z"/>
@@ -48,50 +55,101 @@ interface BottomPanelProps {
 
 interface TerminalInstance {
   id: string;
+  shell?: string;
+}
+
+interface TerminalGroup {
+  id: string;
+  terminals: TerminalInstance[];
+  activeTerminalId: string;
 }
 
 export default function BottomPanel({ onClose }: BottomPanelProps) {
   const [activeTab, setActiveTab] = useState<'terminal' | 'output' | 'problems'>('terminal');
   
   // Terminal Multiplexing State - Initialized lazily to avoid Date clock drifts in strict mode
-  const [terminals, setTerminals] = useState<TerminalInstance[]>(() => [{ id: `term-${Date.now()}` }]);
-  const [activeTerminalId, setActiveTerminalId] = useState<string>(terminals[0].id);
+  const [groups, setGroups] = useState<TerminalGroup[]>(() => {
+    const termId = `term-${Date.now()}`;
+    return [{ id: `group-${Date.now()}`, terminals: [{ id: termId }], activeTerminalId: termId }];
+  });
+  const [activeGroupId, setActiveGroupId] = useState<string>(groups[0].id);
   const [titles, setTitles] = useState<Record<string, string>>({});
 
-  const handleNewTerminal = () => {
-    const newId = `term-${Date.now()}`;
-    setTerminals(prev => [...prev, { id: newId }]);
-    setActiveTerminalId(newId);
+  const [availableShells, setAvailableShells] = useState<string[]>([]);
+  const [isShellDropdownOpen, setIsShellDropdownOpen] = useState(false);
+
+  useEffect(() => {
+    invoke<string[]>('get_available_shells').then(setAvailableShells).catch(console.error);
+  }, []);
+
+  const handleNewTerminal = (shell?: string) => {
+    const newTermId = `term-${Date.now()}`;
+    const newGroupId = `group-${Date.now()}`;
+    setGroups(prev => [...prev, {
+      id: newGroupId,
+      terminals: [{ id: newTermId, shell }],
+      activeTerminalId: newTermId
+    }]);
+    setActiveGroupId(newGroupId);
   };
 
-  const handleSplitTerminal = () => {
-    // For now, mapping a split acts as a new terminal in the sidebar group.
-    handleNewTerminal();
+  const handleSplitTerminal = (shell?: string) => {
+    const newTermId = `term-${Date.now()}`;
+    setGroups(prev => prev.map(g => {
+      if (g.id === activeGroupId) {
+        return {
+          ...g,
+          terminals: [...g.terminals, { id: newTermId, shell }],
+          activeTerminalId: newTermId
+        };
+      }
+      return g;
+    }));
   };
 
   const handleKillTerminal = () => {
-    // Note: the backend Rust kill_pty is robustly handled by Terminal.tsx's unmount cleanup hook.
-    const nextList = terminals.filter(t => t.id !== activeTerminalId);
+    const groupIndex = groups.findIndex(g => g.id === activeGroupId);
+    if (groupIndex === -1) return;
+    const group = groups[groupIndex];
+    const targetTermId = group.activeTerminalId;
     
     // Clean up title memory
     setTitles(prev => {
       const nextTitles = { ...prev };
-      delete nextTitles[activeTerminalId];
+      delete nextTitles[targetTermId];
       return nextTitles;
     });
 
-    if (nextList.length > 0) {
-      setTerminals(nextList);
-      setActiveTerminalId(nextList[nextList.length - 1].id);
+    let nextGroups = [...groups];
+    let nextActiveGroupId = activeGroupId;
+
+    const targetIdx = group.terminals.findIndex(t => t.id === targetTermId);
+    const nextTerms = group.terminals.filter(t => t.id !== targetTermId);
+
+    if (nextTerms.length === 0) {
+      // Entire group killed
+      nextGroups.splice(groupIndex, 1);
+      if (nextGroups.length === 0) {
+        const fallbackTermId = `term-${Date.now()}`;
+        const fallbackGroupId = `group-${Date.now()}`;
+        nextGroups = [{ id: fallbackGroupId, terminals: [{ id: fallbackTermId }], activeTerminalId: fallbackTermId }];
+        nextActiveGroupId = fallbackGroupId;
+        if (onClose) onClose(); // Gracefully collapse UI since everything died
+      } else {
+        nextActiveGroupId = nextGroups[Math.max(0, groupIndex - 1)].id;
+      }
     } else {
-      // Gracefully close the entire bottom panel if the final terminal is killed
-      if (onClose) onClose();
-      
-      // Auto-restart a fresh standby shell while hidden, ensuring the toggle shortcut has a terminal ready
-      const newId = `term-${Date.now()}`;
-      setTerminals([{ id: newId }]);
-      setActiveTerminalId(newId);
+      // Switch active terminal within surviving group horizontally seamlessly
+      const nextActiveIdx = Math.min(targetIdx, nextTerms.length - 1);
+      nextGroups[groupIndex] = {
+        ...group,
+        terminals: nextTerms,
+        activeTerminalId: nextTerms[nextActiveIdx].id
+      };
     }
+
+    setGroups(nextGroups);
+    setActiveGroupId(nextActiveGroupId);
   };
 
   return (
@@ -121,10 +179,40 @@ export default function BottomPanel({ onClose }: BottomPanelProps) {
         {/* Terminal Actions (Only visible when Terminal is active) */}
         {activeTab === 'terminal' && (
           <div className="actions-group">
-            <button className="icon-btn" title="New Terminal" onClick={handleNewTerminal}>
-              <PlusIcon />
-            </button>
-            <button className="icon-btn" title="Split Terminal" onClick={handleSplitTerminal}>
+            <div className="split-action-btn">
+              <button className="icon-btn" title="New Terminal" onClick={() => handleNewTerminal()}>
+                <PlusIcon />
+              </button>
+              <button 
+                className="icon-btn" 
+                title="Select Default Profile"
+                style={{ paddingLeft: '2px', paddingRight: '4px' }}
+                onClick={() => setIsShellDropdownOpen(!isShellDropdownOpen)}
+              >
+                <ChevronDownIcon />
+              </button>
+
+              {isShellDropdownOpen && (
+                <div className="shell-dropdown-menu">
+                  <div className="shell-dropdown-header">Select Profile</div>
+                  {availableShells.map(sh => {
+                    const name = sh.split('/').pop();
+                    return (
+                      <div key={sh} className="shell-dropdown-item" onClick={() => {
+                        handleNewTerminal(sh);
+                        setIsShellDropdownOpen(false);
+                      }}>
+                        <div style={{ width: '16px', height: '16px', marginRight: '8px', opacity: 0.8 }}><TerminalIcon /></div>
+                        {name}
+                        <span className="shell-dropdown-path">{sh}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <button className="icon-btn" title="Split Terminal" onClick={() => handleSplitTerminal()}>
               <SplitIcon />
             </button>
             <button className="icon-btn" title="Kill Terminal" onClick={handleKillTerminal}>
@@ -152,41 +240,92 @@ export default function BottomPanel({ onClose }: BottomPanelProps) {
         <div style={{ display: activeTab === 'terminal' ? 'flex' : 'none', height: '100%', width: '100%' }}>
           
           {/* Main Terminal View Container */}
-          <div style={{ flex: 1, position: 'relative' }}>
-            {terminals.map((term) => (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'row', position: 'relative', minWidth: 0 }}>
+            {groups.map(group => (
               <div 
-                key={term.id} 
+                key={group.id} 
                 style={{ 
-                  display: activeTerminalId === term.id ? 'block' : 'none',
-                  width: '100%',
-                  height: '100%'
+                  display: activeGroupId === group.id ? 'flex' : 'none', 
+                  flex: 1, 
+                  flexDirection: 'row', 
+                  width: '100%', 
+                  height: '100%',
+                  minWidth: 0
                 }}
               >
-                <Terminal 
-                  id={term.id} 
-                  isActive={activeTerminalId === term.id}
-                  onClick={() => setActiveTerminalId(term.id)}
-                  onTitleChange={(title) => setTitles(prev => ({...prev, [term.id]: title}))}
-                />
+                {group.terminals.map((term, index) => (
+                  <div
+                    key={term.id}
+                    style={{
+                      flex: 1,
+                      borderRight: index < group.terminals.length - 1 ? '1px solid #333' : 'none',
+                      position: 'relative',
+                      minWidth: 0
+                    }}
+                  >
+                    <Terminal
+                      id={term.id}
+                      shell={term.shell}
+                      isActive={activeGroupId === group.id && group.activeTerminalId === term.id}
+                      onClick={() => {
+                        setActiveGroupId(group.id);
+                        setGroups(prev => prev.map(g => g.id === group.id ? { ...g, activeTerminalId: term.id } : g));
+                      }}
+                      onTitleChange={(title) => setTitles(prev => ({...prev, [term.id]: title}))}
+                    />
+                  </div>
+                ))}
               </div>
             ))}
           </div>
 
           {/* Sidebar Terminal Menu */}
-          {terminals.length > 0 && (
+          {groups.length > 0 && (
             <div className="terminal-sidebar">
-              {terminals.map((term) => (
-                <div 
-                  key={term.id}
-                  className={`sidebar-item ${activeTerminalId === term.id ? 'active' : ''}`}
-                  onClick={() => setActiveTerminalId(term.id)}
-                >
-                  <div className="sidebar-item-icon">
-                    <TerminalIcon />
-                  </div>
-                  <span>{titles[term.id] || 'zsh'}</span>
-                </div>
-              ))}
+              {groups.flatMap((group) => {
+                if (group.terminals.length === 1) {
+                  const term = group.terminals[0];
+                  const isTermActive = activeGroupId === group.id;
+                  const defaultLabel = term.shell ? term.shell.split('/').pop() : 'zsh';
+                  return (
+                    <div 
+                      key={term.id}
+                      className={`sidebar-item ${isTermActive ? 'active' : ''}`}
+                      onClick={() => setActiveGroupId(group.id)}
+                    >
+                      <div className="sidebar-item-icon">
+                        <TerminalIcon />
+                      </div>
+                      <span className="sidebar-item-text">{titles[term.id] || defaultLabel}</span>
+                    </div>
+                  );
+                } else {
+                  return group.terminals.map((term, index) => {
+                    const isTermActive = activeGroupId === group.id && group.activeTerminalId === term.id;
+                    const isFirst = index === 0;
+                    const isLast = index === group.terminals.length - 1;
+                    const elbow = isFirst ? '┌' : (isLast ? '└' : '├');
+                    const defaultLabel = term.shell ? term.shell.split('/').pop() : 'zsh';
+
+                    return (
+                      <div 
+                        key={term.id}
+                        className={`sidebar-item split-item ${isTermActive ? 'active' : ''}`}
+                        onClick={() => {
+                          setActiveGroupId(group.id);
+                          setGroups(prev => prev.map(g => g.id === group.id ? { ...g, activeTerminalId: term.id } : g));
+                        }}
+                      >
+                        <span className="tree-elbow">{elbow}</span>
+                        <div className="sidebar-item-icon">
+                          <TerminalIcon />
+                        </div>
+                        <span className="sidebar-item-text">{titles[term.id] || defaultLabel}</span>
+                      </div>
+                    );
+                  });
+                }
+              })}
             </div>
           )}
         </div>

@@ -21,7 +21,30 @@ struct PtyPayload {
 }
 
 #[tauri::command]
-fn spawn_pty(id: String, rows: u16, cols: u16, app_handle: tauri::AppHandle, state: State<'_, PtyState>) -> Result<(), String> {
+fn get_available_shells() -> Result<Vec<String>, String> {
+    #[cfg(unix)]
+    {
+        if let Ok(contents) = std::fs::read_to_string("/etc/shells") {
+            let shells: Vec<String> = contents
+                .lines()
+                .map(|line| line.trim().to_string())
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .collect();
+            if !shells.is_empty() {
+                return Ok(shells);
+            }
+        }
+    }
+    
+    #[cfg(windows)]
+    return Ok(vec!["powershell.exe".to_string(), "cmd.exe".to_string()]);
+    
+    #[cfg(not(windows))]
+    Ok(vec!["/bin/sh".to_string(), "/bin/bash".to_string(), "/bin/zsh".to_string()])
+}
+
+#[tauri::command]
+fn spawn_pty(id: String, rows: u16, cols: u16, shell: Option<String>, app_handle: tauri::AppHandle, state: State<'_, PtyState>) -> Result<(), String> {
     let pty_system = native_pty_system();
     
     let pair = pty_system.openpty(PtySize {
@@ -31,11 +54,13 @@ fn spawn_pty(id: String, rows: u16, cols: u16, app_handle: tauri::AppHandle, sta
         pixel_height: 0,
     }).map_err(|e| e.to_string())?;
 
-    let default_shell = if cfg!(target_os = "windows") {
-        std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
-    } else {
-        std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string())
-    };
+    let default_shell = shell.unwrap_or_else(|| {
+        if cfg!(target_os = "windows") {
+            std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+        } else {
+            std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string())
+        }
+    });
 
     let mut cmd = CommandBuilder::new(default_shell);
     cmd.env("TERM", "xterm-256color");
@@ -114,7 +139,7 @@ pub fn run() {
             sessions: Arc::new(Mutex::new(HashMap::new())),
         })
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![spawn_pty, write_pty, resize_pty, kill_pty])
+        .invoke_handler(tauri::generate_handler![spawn_pty, write_pty, resize_pty, kill_pty, get_available_shells])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

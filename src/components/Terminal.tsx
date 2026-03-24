@@ -13,11 +13,12 @@ interface PtyPayload {
 interface TerminalProps {
   id: string;
   isActive: boolean;
+  shell?: string;
   onClick: () => void;
   onTitleChange?: (title: string) => void;
 }
 
-export default function Terminal({ id, isActive, onClick, onTitleChange }: TerminalProps) {
+export default function Terminal({ id, isActive, shell, onClick, onTitleChange }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const sessionIdRef = useRef(`${id}-${Date.now()}-${Math.floor(Math.random() * 1000)}`);
@@ -52,7 +53,7 @@ export default function Terminal({ id, isActive, onClick, onTitleChange }: Termi
     const spawnTimeout = setTimeout(() => {
       fitAddon.fit();
 
-      invoke('spawn_pty', { id: sessionId, rows: term.rows, cols: term.cols }).catch((err) => {
+      invoke('spawn_pty', { id: sessionId, rows: term.rows, cols: term.cols, shell }).catch((err) => {
         console.error(err);
         term.write(`\r\n\x1b[1;31mError spawning PTY: ${err}\x1b[0m\r\n`);
       }).then(() => {
