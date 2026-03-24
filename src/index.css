@@ -20,3 +20,52 @@ body,
 .cm-scroller {
     overflow: auto;
 }
+
+/* Bottom Panel UI */
+.bottom-panel-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: #1e1e1e;
+}
+
+.tab-bar {
+  display: flex;
+  background-color: #181818;
+  border-bottom: 1px solid #333;
+  padding: 0 16px;
+  gap: 8px;
+}
+
+.tab-btn {
+  background: none;
+  border: none;
+  color: #888;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.tab-btn:hover {
+  color: #ccc;
+}
+
+.tab-btn.active {
+  color: #e5e5e5;
+  border-bottom: 2px solid #007acc;
+}
+
+.tab-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  background-color: #1e1e1e;
+}
