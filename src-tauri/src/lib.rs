@@ -1,21 +1,32 @@
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::io::{Read, Write};
 use tauri::{Emitter, State};
 use std::thread;
 
+struct PtySession {
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    master: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+}
+
 struct PtyState {
-    writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
-    master: Arc<Mutex<Option<Box<dyn portable_pty::MasterPty + Send>>>>,
+    sessions: Arc<Mutex<HashMap<String, PtySession>>>,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct PtyPayload {
+    id: String,
+    data: String,
 }
 
 #[tauri::command]
-fn spawn_pty(app_handle: tauri::AppHandle, state: State<'_, PtyState>) -> Result<(), String> {
+fn spawn_pty(id: String, rows: u16, cols: u16, app_handle: tauri::AppHandle, state: State<'_, PtyState>) -> Result<(), String> {
     let pty_system = native_pty_system();
     
     let pair = pty_system.openpty(PtySize {
-        rows: 24,
-        cols: 80,
+        rows,
+        cols,
         pixel_width: 0,
         pixel_height: 0,
     }).map_err(|e| e.to_string())?;
@@ -26,31 +37,34 @@ fn spawn_pty(app_handle: tauri::AppHandle, state: State<'_, PtyState>) -> Result
         std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string())
     };
 
-    let cmd = CommandBuilder::new(default_shell);
+    let mut cmd = CommandBuilder::new(default_shell);
+    cmd.env("TERM", "xterm-256color");
     let _child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
 
-    // Drop slave as we don't need it on the master side
     drop(pair.slave);
 
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
 
     {
-        let mut state_writer = state.writer.lock().unwrap();
-        *state_writer = Some(writer);
-        
-        let mut state_master = state.master.lock().unwrap();
-        *state_master = Some(pair.master);
+        let mut sessions = state.sessions.lock().unwrap();
+        sessions.insert(id.clone(), PtySession {
+            writer: Arc::new(Mutex::new(writer)),
+            master: Arc::new(Mutex::new(pair.master)),
+        });
     }
 
-    // Spawn thread to read from pty and emit to frontend
+    let thread_id = id.clone();
     thread::spawn(move || {
-        let mut buf = [0u8; 1024];
+        let mut buf = [0u8; 2048];
         loop {
             match reader.read(&mut buf) {
                 Ok(n) if n > 0 => {
                     let text = String::from_utf8_lossy(&buf[..n]).to_string();
-                    let _ = app_handle.emit("pty-output", text);
+                    let _ = app_handle.emit("pty-output", PtyPayload {
+                        id: thread_id.clone(),
+                        data: text,
+                    });
                 }
                 _ => break,
             }
@@ -61,19 +75,21 @@ fn spawn_pty(app_handle: tauri::AppHandle, state: State<'_, PtyState>) -> Result
 }
 
 #[tauri::command]
-fn write_pty(state: State<'_, PtyState>, data: String) -> Result<(), String> {
-    let mut writer_guard = state.writer.lock().unwrap();
-    if let Some(writer) = writer_guard.as_mut() {
-        writer.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
+fn write_pty(id: String, data: String, state: State<'_, PtyState>) -> Result<(), String> {
+    let sessions = state.sessions.lock().unwrap();
+    if let Some(session) = sessions.get(&id) {
+        let mut writer_guard = session.writer.lock().unwrap();
+        writer_guard.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
 #[tauri::command]
-fn resize_pty(state: State<'_, PtyState>, rows: u16, cols: u16) -> Result<(), String> {
-    let master_guard = state.master.lock().unwrap();
-    if let Some(master) = master_guard.as_ref() {
-        master.resize(PtySize {
+fn resize_pty(id: String, rows: u16, cols: u16, state: State<'_, PtyState>) -> Result<(), String> {
+    let sessions = state.sessions.lock().unwrap();
+    if let Some(session) = sessions.get(&id) {
+        let master_guard = session.master.lock().unwrap();
+        master_guard.resize(PtySize {
             rows,
             cols,
             pixel_width: 0,
@@ -83,16 +99,22 @@ fn resize_pty(state: State<'_, PtyState>, rows: u16, cols: u16) -> Result<(), St
     Ok(())
 }
 
+#[tauri::command]
+fn kill_pty(id: String, state: State<'_, PtyState>) -> Result<(), String> {
+    let mut sessions = state.sessions.lock().unwrap();
+    sessions.remove(&id);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .manage(PtyState {
-            writer: Arc::new(Mutex::new(None)),
-            master: Arc::new(Mutex::new(None)),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
         })
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![spawn_pty, write_pty, resize_pty])
+        .invoke_handler(tauri::generate_handler![spawn_pty, write_pty, resize_pty, kill_pty])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -5,9 +5,23 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import '@xterm/xterm/css/xterm.css';
 
-export default function Terminal() {
+interface PtyPayload {
+  id: string;
+  data: string;
+}
+
+interface TerminalProps {
+  id: string;
+  isActive: boolean;
+  onClick: () => void;
+  onTitleChange?: (title: string) => void;
+}
+
+export default function Terminal({ id, isActive, onClick, onTitleChange }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
+  const sessionIdRef = useRef(`${id}-${Date.now()}-${Math.floor(Math.random() * 1000)}`);
+  const sessionId = sessionIdRef.current;
 
   useEffect(() => {
     if (!terminalRef.current) return;
@@ -17,7 +31,7 @@ export default function Terminal() {
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
       fontSize: 13,
       theme: {
-        background: '#1e1e1e',
+        background: '#0a0a0c', // Deeper distinction from editor
         foreground: '#cccccc',
         cursor: '#ffffff',
       },
@@ -29,54 +43,79 @@ export default function Terminal() {
     term.loadAddon(fitAddon);
 
     term.open(terminalRef.current);
-    fitAddon.fit();
+    let unlistenPromise: Promise<() => void> | null = null;
+    let resizeListener: { dispose: () => void } | null = null;
 
-    // Start PTY in backend
-    invoke('spawn_pty').catch((err) => {
-      console.error(err);
-      term.write(`\r\n\x1b[1;31mError spawning PTY: ${err}\x1b[0m\r\n`);
-    });
+    // Delay spawning by 50ms so CSS Engine perfectly calculates width/height.
+    // This completely eradicates Xcode/macOS Zsh throwing initial inverted `%` lines
+    // and sending duplicate prompt spam because it boots thinking it's 0x0 size!
+    const spawnTimeout = setTimeout(() => {
+      fitAddon.fit();
 
-    // Listen for data from backend PTY
-    let unlisten: () => void;
-    listen<string>('pty-output', (event) => {
-      term.write(event.payload);
-    }).then((un) => {
-      unlisten = un;
+      invoke('spawn_pty', { id: sessionId, rows: term.rows, cols: term.cols }).catch((err) => {
+        console.error(err);
+        term.write(`\r\n\x1b[1;31mError spawning PTY: ${err}\x1b[0m\r\n`);
+      }).then(() => {
+        // macOS Zsh specific hack to clear the three buggy initialization prompts reliably
+        setTimeout(() => invoke('write_pty', { id: sessionId, data: '\x0c' }).catch(console.error), 250);
+      });
+
+      unlistenPromise = listen<PtyPayload>('pty-output', (event) => {
+        if (event.payload.id === sessionId) {
+          term.write(event.payload.data);
+        }
+      });
+
+      resizeListener = term.onResize(({ rows, cols }) => {
+        if (rows > 0 && cols > 0) {
+          invoke('resize_pty', { id: sessionId, rows, cols }).catch(console.error);
+        }
+      });
+    }, 50);
+
+    // Track dynamic contextual heading updates from the shell
+    const titleListener = term.onTitleChange((title) => {
+      if (onTitleChange) onTitleChange(title);
     });
 
     // Send input to backend PTY
     term.onData((data: string) => {
-      invoke('write_pty', { data }).catch(console.error);
+      invoke('write_pty', { id: sessionId, data }).catch(console.error);
     });
 
-    // Handle resize window
-    const handleResize = () => {
-      fitAddon.fit();
-      const { rows, cols } = term;
-      invoke('resize_pty', { rows, cols }).catch(console.error);
-    };
-
-    window.addEventListener('resize', handleResize);
-    // Initial resize to inform backend
-    handleResize();
+    // Use ResizeObserver for pinpoint container detection
+    const observer = new ResizeObserver(() => {
+      if (term.element?.clientWidth) {
+        fitAddon.fit();
+      }
+    });
+    observer.observe(terminalRef.current);
 
     return () => {
+      clearTimeout(spawnTimeout);
+      observer.disconnect();
+      if (resizeListener) resizeListener.dispose();
+      titleListener.dispose();
       term.dispose();
-      window.removeEventListener('resize', handleResize);
-      if (unlisten) unlisten();
+      if (unlistenPromise) unlistenPromise.then(un => un());
+      invoke('kill_pty', { id: sessionId }).catch(console.error);
     };
   }, []);
 
   return (
     <div
       ref={terminalRef}
+      onFocus={onClick}
+      onClick={onClick}
       style={{
         width: '100%',
         height: '100%',
-        backgroundColor: '#1e1e1e',
+        backgroundColor: '#0a0a0c',
         padding: '8px',
-        boxSizing: 'border-box'
+        boxSizing: 'border-box',
+        opacity: isActive ? 1.0 : 0.6,
+        transition: 'opacity 0.2s',
+        cursor: 'text'
       }}
     />
   );

@@ -27,7 +27,7 @@ body,
   flex-direction: column;
   height: 100%;
   width: 100%;
-  background-color: #1e1e1e;
+  background-color: #0a0a0c;
 }
 
 .tab-bar {
@@ -75,9 +75,81 @@ body,
   border-radius: 4px;
 }
 
+/* Icon Buttons for Terminal Actions */
+.icon-btn {
+  background: none;
+  border: none;
+  color: #cccccc;
+  padding: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  transition: all 0.15s ease;
+  outline: none;
+}
+.icon-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.actions-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.divider {
+  width: 1px;
+  height: 16px;
+  background-color: #444;
+  margin: 0 4px;
+}
+
 .tab-content {
   flex: 1;
   overflow: hidden;
   position: relative;
-  background-color: #1e1e1e;
+  background-color: #0a0a0c;
+}
+
+/* Terminal Sidebar */
+.terminal-sidebar {
+  width: 200px;
+  background-color: #0a0a0c;
+  border-left: 1px solid #222;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0;
+  overflow-y: auto;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  cursor: pointer;
+  color: #888;
+  font-size: 13px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  transition: background-color 0.1s;
+}
+
+.sidebar-item:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-item.active {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #e5e5e5;
+  border-left: 2px solid #007acc;
+  padding-left: 14px;
+}
+
+.sidebar-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
