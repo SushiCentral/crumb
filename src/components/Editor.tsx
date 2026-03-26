@@ -5,6 +5,10 @@ import { oneDarkTheme } from "@codemirror/theme-one-dark";
 import { javascript } from "@codemirror/lang-javascript";
 import { zedSyntaxHighlighting } from "../lib/highlight"; // add this
 
+interface EditorProps {
+    doc: string;
+}
+
 const zedStyleOverrides = EditorView.theme({
     "&": {
         backgroundColor: "#1c1c1c",
@@ -60,7 +64,7 @@ const zedStyleOverrides = EditorView.theme({
     },
 });
 
-export default function Editor() {
+export default function Editor({ doc }: EditorProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<EditorView | null>(null);
 
@@ -68,7 +72,7 @@ export default function Editor() {
         if (!containerRef.current) return;
 
         const state = EditorState.create({
-            doc: `// Welcome to Horizon\n\nfunction hello() {\n  console.log("Hello, world!");\n}\n`,
+            doc,
             extensions: [
                 zedSyntaxHighlighting, // Move to top for highest precedence
                 zedStyleOverrides,
@@ -89,6 +93,22 @@ export default function Editor() {
             view.destroy();
         };
     }, []);
+
+    useEffect(() => {
+        const view = viewRef.current;
+        if (!view) return;
+
+        const current = view.state.doc.toString();
+        if (current === doc) return;
+
+        view.dispatch({
+            changes: {
+                from: 0,
+                to: view.state.doc.length,
+                insert: doc,
+            },
+        });
+    }, [doc]);
 
     return (
         <div

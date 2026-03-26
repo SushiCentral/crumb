@@ -1,10 +1,33 @@
 import { useState, useEffect } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { readTextFile } from "@tauri-apps/plugin-fs";
 import Editor from "./components/Editor";
 import BottomPanel from "./components/BottomPanel";
 import "./App.css";
 
 export default function App() {
   const [isPanelOpen, setIsPanelOpen] = useState(true);
+  const [editorContent, setEditorContent] = useState(
+    `// Welcome to Horizon\n\nfunction hello() {\n  console.log("Hello, world!");\n}\n`
+  );
+
+  const handleOpenFile = async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        directory: false,
+      });
+
+      if (!selected || Array.isArray(selected)) {
+        return;
+      }
+
+      const content = await readTextFile(selected);
+      setEditorContent(content);
+    } catch (error) {
+      console.error("Failed to open file:", error);
+    }
+  };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -12,6 +35,13 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
         e.preventDefault();
         setIsPanelOpen(prev => !prev);
+        return;
+      }
+
+      // Open file on Cmd+O or Ctrl+O
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        void handleOpenFile();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -21,7 +51,7 @@ export default function App() {
   return (
     <div style={{ height: "100vh", width: "100vw", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <div style={{ flex: 1, overflow: "hidden" }}>
-        <Editor />
+        <Editor doc={editorContent} />
       </div>
       <div 
         style={{ 
