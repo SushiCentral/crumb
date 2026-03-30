@@ -22,6 +22,10 @@
       "allow": [{ "path": "**" }]
     },
     {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [{ "path": "**" }]
+    },
+    {
       "identifier": "fs:allow-stat",
       "allow": [{ "path": "**" }]
     }

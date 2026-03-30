@@ -1,13 +1,16 @@
 import { useEffect, useRef } from "react";
 import { EditorView, basicSetup } from "codemirror";
-import { EditorState } from "@codemirror/state";
+import { Annotation, EditorState } from "@codemirror/state";
 import { oneDarkTheme } from "@codemirror/theme-one-dark";
 import { javascript } from "@codemirror/lang-javascript";
 import { zedSyntaxHighlighting } from "../lib/highlight"; // add this
 
 interface EditorProps {
     doc: string;
+    onChange?: (value: string) => void;
 }
+
+const externalDocUpdate = Annotation.define<boolean>();
 
 const zedStyleOverrides = EditorView.theme({
     "&": {
@@ -64,9 +67,14 @@ const zedStyleOverrides = EditorView.theme({
     },
 });
 
-export default function Editor({ doc }: EditorProps) {
+export default function Editor({ doc, onChange }: EditorProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<EditorView | null>(null);
+    const onChangeRef = useRef<EditorProps["onChange"]>(onChange);
+
+    useEffect(() => {
+        onChangeRef.current = onChange;
+    }, [onChange]);
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -77,6 +85,17 @@ export default function Editor({ doc }: EditorProps) {
                 zedSyntaxHighlighting, // Move to top for highest precedence
                 zedStyleOverrides,
                 basicSetup,
+                EditorView.updateListener.of((update) => {
+                    if (!update.docChanged) return;
+
+                    const isExternalUpdate = update.transactions.some((transaction) =>
+                        transaction.annotation(externalDocUpdate)
+                    );
+
+                    if (!isExternalUpdate) {
+                        onChangeRef.current?.(update.state.doc.toString());
+                    }
+                }),
                 javascript(),
                 oneDarkTheme,
             ],
@@ -102,6 +121,7 @@ export default function Editor({ doc }: EditorProps) {
         if (current === doc) return;
 
         view.dispatch({
+            annotations: externalDocUpdate.of(true),
             changes: {
                 from: 0,
                 to: view.state.doc.length,

@@ -1,66 +1,125 @@
-import { useState, useEffect } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
-import { readTextFile } from "@tauri-apps/plugin-fs";
+import { useState, useEffect, useRef } from "react";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import Editor from "./components/Editor";
 import BottomPanel from "./components/BottomPanel";
 import FileExplorer from "./components/FileExplorer";
 import documentIcon from "./assets/document.svg";
 import "./App.css";
 
+const initialDoc = `// Welcome to Crumb\n\nfunction hello() {\n  console.log("Hello, world!");\n}\n`;
+
+const getFileNameFromPath = (path: string | null) => {
+  if (!path) {
+    return "Untitled";
+  }
+
+  const segments = path.split(/[\\/]/).filter(Boolean);
+  return segments.length > 0 ? segments[segments.length - 1] : path;
+};
+
 export default function App() {
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [editorContent, setEditorContent] = useState(
-    `// Welcome to Crumb\n\nfunction hello() {\n  console.log("Hello, world!");\n}\n`
-  );
+  const [openFilePath, setOpenFilePath] = useState<string | null>(null);
+  const [editorContent, setEditorContent] = useState(initialDoc);
+  const [lastSavedContent, setLastSavedContent] = useState(initialDoc);
+  const openFilePathRef = useRef<string | null>(null);
+  const editorContentRef = useRef(initialDoc);
 
-  const handleOpenFile = async (path?: string | any) => {
+  const hasUnsavedChanges = editorContent !== lastSavedContent;
+
+  const handleOpenFile = async (path?: string) => {
     try {
-      let selectedPath = typeof path === 'string' ? path : null;
+      let selectedPath = typeof path === "string" ? path : null;
       if (!selectedPath) {
         const selected = await open({
           multiple: false,
           directory: false,
         });
 
-        if (!selected || Array.isArray(selected)) {
+        if (typeof selected !== "string") {
           return;
         }
         selectedPath = selected;
       }
 
       const content = await readTextFile(selectedPath);
+      openFilePathRef.current = selectedPath;
+      editorContentRef.current = content;
+      setOpenFilePath(selectedPath);
       setEditorContent(content);
+      setLastSavedContent(content);
     } catch (error) {
       console.error("Failed to open file:", error);
+    }
+  };
+
+  const handleEditorChange = (nextValue: string) => {
+    editorContentRef.current = nextValue;
+    setEditorContent(nextValue);
+  };
+
+  const handleSaveFile = async () => {
+    try {
+      let targetPath = openFilePathRef.current;
+
+      if (!targetPath) {
+        const selected = await save({
+          title: "Save File",
+        });
+
+        if (typeof selected !== "string") {
+          return;
+        }
+
+        targetPath = selected;
+      }
+
+      const contentToSave = editorContentRef.current;
+      await writeTextFile(targetPath, contentToSave);
+      openFilePathRef.current = targetPath;
+      setOpenFilePath(targetPath);
+      setLastSavedContent(contentToSave);
+    } catch (error) {
+      console.error("Failed to save file:", error);
     }
   };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Toggle bottom panel on Cmd+J or Ctrl+J
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
         e.preventDefault();
-        setIsPanelOpen(prev => !prev);
+        setIsPanelOpen((prev) => !prev);
         return;
       }
 
       // Toggle sidebar on Cmd+B or Ctrl+B
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
-        setIsSidebarOpen(prev => !prev);
+        setIsSidebarOpen((prev) => !prev);
         return;
       }
 
       // Open file on Cmd+O or Ctrl+O
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'o') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "o") {
         e.preventDefault();
         void handleOpenFile();
+        return;
+      }
+
+      // Save file on Cmd+S or Ctrl+S
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void handleSaveFile();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  const activeFileName = getFileNameFromPath(openFilePath);
 
   return (
     <div style={{ height: "100vh", width: "100vw", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -95,12 +154,12 @@ export default function App() {
               transition: "all 0.15s ease",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-              e.currentTarget.style.opacity = '1';
+              e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.1)";
+              e.currentTarget.style.opacity = "1";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.opacity = isSidebarOpen ? '1' : '0.5';
+              e.currentTarget.style.backgroundColor = "transparent";
+              e.currentTarget.style.opacity = isSidebarOpen ? "1" : "0.5";
             }}
           >
             <img src={documentIcon} alt="Explorer" style={{ width: "20px", height: "20px" }} />
@@ -120,8 +179,29 @@ export default function App() {
         </div>
         
         {/* Main Editor */}
-        <div style={{ flex: 1, overflow: "hidden" }}>
-          <Editor doc={editorContent} />
+        <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          <div
+            style={{
+              height: "34px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "0 12px",
+              borderBottom: "1px solid #333",
+              backgroundColor: "#1f1f1f",
+              color: "#b3b3b3",
+              fontSize: "12px",
+              fontFamily: "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+            }}
+          >
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {activeFileName}
+            </span>
+            {hasUnsavedChanges && <span style={{ color: "#e8c547" }}>Unsaved</span>}
+          </div>
+          <div style={{ flex: 1, overflow: "hidden" }}>
+            <Editor doc={editorContent} onChange={handleEditorChange} />
+          </div>
         </div>
       </div>
       
