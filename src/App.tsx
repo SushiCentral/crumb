@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import Editor from "./components/Editor";
 import BottomPanel from "./components/BottomPanel";
+import FileExplorer from "./components/FileExplorer";
 import "./App.css";
 
 export default function App() {
@@ -11,18 +12,22 @@ export default function App() {
     `// Welcome to Horizon\n\nfunction hello() {\n  console.log("Hello, world!");\n}\n`
   );
 
-  const handleOpenFile = async () => {
+  const handleOpenFile = async (path?: string | any) => {
     try {
-      const selected = await open({
-        multiple: false,
-        directory: false,
-      });
+      let selectedPath = typeof path === 'string' ? path : null;
+      if (!selectedPath) {
+        const selected = await open({
+          multiple: false,
+          directory: false,
+        });
 
-      if (!selected || Array.isArray(selected)) {
-        return;
+        if (!selected || Array.isArray(selected)) {
+          return;
+        }
+        selectedPath = selected;
       }
 
-      const content = await readTextFile(selected);
+      const content = await readTextFile(selectedPath);
       setEditorContent(content);
     } catch (error) {
       console.error("Failed to open file:", error);
@@ -50,9 +55,19 @@ export default function App() {
 
   return (
     <div style={{ height: "100vh", width: "100vw", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <div style={{ flex: 1, overflow: "hidden" }}>
-        <Editor doc={editorContent} />
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+        {/* Sidebar */}
+        <div style={{ width: "250px", minWidth: "250px", borderRight: "1px solid #333", backgroundColor: "#1e1e1e", overflow: "hidden" }}>
+          <FileExplorer onFileSelect={handleOpenFile} />
+        </div>
+        
+        {/* Main Editor */}
+        <div style={{ flex: 1, overflow: "hidden" }}>
+          <Editor doc={editorContent} />
+        </div>
       </div>
+      
+      {/* Bottom Panel */}
       <div 
         style={{ 
           height: isPanelOpen ? "40%" : "0", 
