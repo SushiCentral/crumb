@@ -11,7 +11,7 @@ export default function App() {
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [editorContent, setEditorContent] = useState(
-    `// Welcome to Horizon\n\nfunction hello() {\n  console.log("Hello, world!");\n}\n`
+    `// Welcome to Crumb\n\nfunction hello() {\n  console.log("Hello, world!");\n}\n`
   );
 
   const handleOpenFile = async (path?: string | any) => {
