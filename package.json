@@ -11,7 +11,6 @@
     "tauri:dev": "cross-env WEBKIT_DISABLE_DMABUF_RENDERER=1 tauri dev"
   },
   "dependencies": {
-    "@codemirror/basic-setup": "^0.20.0",
     "@codemirror/lang-javascript": "^6.2.5",
     "@codemirror/language": "^6.12.2",
     "@codemirror/state": "^6.6.0",

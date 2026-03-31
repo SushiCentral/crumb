@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { EditorView, basicSetup } from "codemirror";
 import { Annotation, EditorState } from "@codemirror/state";
-import { oneDarkTheme } from "@codemirror/theme-one-dark";
 import { javascript } from "@codemirror/lang-javascript";
 import { zedSyntaxHighlighting } from "../lib/highlight"; // add this
 
@@ -82,9 +81,10 @@ export default function Editor({ doc, onChange }: EditorProps) {
         const state = EditorState.create({
             doc,
             extensions: [
-                zedSyntaxHighlighting, // Move to top for highest precedence
-                zedStyleOverrides,
                 basicSetup,
+                javascript(),
+                zedSyntaxHighlighting,
+                zedStyleOverrides,
                 EditorView.updateListener.of((update) => {
                     if (!update.docChanged) return;
 
@@ -95,9 +95,7 @@ export default function Editor({ doc, onChange }: EditorProps) {
                     if (!isExternalUpdate) {
                         onChangeRef.current?.(update.state.doc.toString());
                     }
-                }),
-                javascript(),
-                oneDarkTheme,
+                })
             ],
         });
 
