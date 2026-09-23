@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { EditorView, basicSetup } from 'codemirror';
-import { Annotation, Compartment, EditorState } from '@codemirror/state';
+import { Annotation, Compartment, EditorState, Prec } from '@codemirror/state';
 import { javascript } from '@codemirror/lang-javascript';
 import { createSyntaxHighlighting } from '../lib/highlight';
 import type { Theme } from '../lib/themes';
@@ -61,9 +61,9 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ doc, them
     const state = EditorState.create({
       doc,
       extensions: [
+        syntaxCompartment.of(Prec.highest(createSyntaxHighlighting(theme))),
         basicSetup,
         javascript(),
-        syntaxCompartment.of(createSyntaxHighlighting(theme)),
         appearanceCompartment.of(editorAppearance(theme, fontSize)),
         EditorView.updateListener.of(update => {
           if (!update.docChanged) return;
@@ -80,7 +80,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ doc, them
   useEffect(() => {
     viewRef.current?.dispatch({
       effects: [
-        syntaxCompartment.reconfigure(createSyntaxHighlighting(theme)),
+        syntaxCompartment.reconfigure(Prec.highest(createSyntaxHighlighting(theme))),
         appearanceCompartment.reconfigure(editorAppearance(theme, fontSize)),
       ],
     });
