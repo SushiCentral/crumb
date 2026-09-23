@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import Terminal from './Terminal';
 import OutputPanel from './OutputPanel';
 import ProblemsPanel from './ProblemsPanel';
+import type { Theme } from '../lib/themes';
 
 // --- SVG Icons for Terminal Actions (VS Code Codicons) ---
 const PlusIcon = () => (
@@ -51,6 +52,10 @@ const TerminalIcon = () => (
 
 interface BottomPanelProps {
   onClose?: () => void;
+  onActiveSessionChange: (sessionId: string | null) => void;
+  theme: Theme;
+  fontSize: number;
+  focusRequest: number;
 }
 
 interface TerminalInstance {
@@ -64,7 +69,7 @@ interface TerminalGroup {
   activeTerminalId: string;
 }
 
-export default function BottomPanel({ onClose }: BottomPanelProps) {
+export default function BottomPanel({ onClose, onActiveSessionChange, theme, fontSize, focusRequest }: BottomPanelProps) {
   const [activeTab, setActiveTab] = useState<'terminal' | 'output' | 'problems'>('terminal');
   
   // Terminal Multiplexing State - Initialized lazily to avoid Date clock drifts in strict mode
@@ -77,10 +82,21 @@ export default function BottomPanel({ onClose }: BottomPanelProps) {
 
   const [availableShells, setAvailableShells] = useState<string[]>([]);
   const [isShellDropdownOpen, setIsShellDropdownOpen] = useState(false);
+  const [sessionIds, setSessionIds] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const group = groups.find(g => g.id === activeGroupId);
+    onActiveSessionChange(group ? sessionIds[group.activeTerminalId] ?? null : null);
+    return () => onActiveSessionChange(null);
+  }, [groups, activeGroupId, sessionIds, onActiveSessionChange]);
 
   useEffect(() => {
     invoke<string[]>('get_available_shells').then(setAvailableShells).catch(console.error);
   }, []);
+
+  useEffect(() => {
+    if (focusRequest > 0) setActiveTab('terminal');
+  }, [focusRequest]);
 
   const handleNewTerminal = (shell?: string) => {
     const newTermId = `term-${Date.now()}`;
@@ -258,13 +274,16 @@ export default function BottomPanel({ onClose }: BottomPanelProps) {
                     key={term.id}
                     style={{
                       flex: 1,
-                      borderRight: index < group.terminals.length - 1 ? '1px solid #333' : 'none',
+                      borderRight: index < group.terminals.length - 1 ? '1px solid var(--border)' : 'none',
                       position: 'relative',
                       minWidth: 0
                     }}
                   >
                     <Terminal
                       id={term.id}
+                      theme={theme}
+                      fontSize={fontSize}
+                      focusRequest={activeTab === 'terminal' ? focusRequest : 0}
                       shell={term.shell}
                       isActive={activeGroupId === group.id && group.activeTerminalId === term.id}
                       onClick={() => {
@@ -272,6 +291,14 @@ export default function BottomPanel({ onClose }: BottomPanelProps) {
                         setGroups(prev => prev.map(g => g.id === group.id ? { ...g, activeTerminalId: term.id } : g));
                       }}
                       onTitleChange={(title) => setTitles(prev => ({...prev, [term.id]: title}))}
+                      onSessionChange={(termId, sessionId) => {
+                        setSessionIds(prev => {
+                          const next = { ...prev };
+                          if (sessionId) next[termId] = sessionId;
+                          else delete next[termId];
+                          return next;
+                        });
+                      }}
                     />
                   </div>
                 ))}
