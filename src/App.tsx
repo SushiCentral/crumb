@@ -1,13 +1,19 @@
 import { useState, useEffect, useRef } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
-import Editor from "./components/Editor";
+import { invoke } from "@tauri-apps/api/core";
+import Editor, { type EditorHandle } from "./components/Editor";
 import BottomPanel from "./components/BottomPanel";
 import FileExplorer from "./components/FileExplorer";
+import CommandPalette, { type PaletteCommand } from "./components/CommandPalette";
+import { getTheme, themes, themeVariables } from "./lib/themes";
 import documentIcon from "./assets/document.svg";
 import "./App.css";
 
 const initialDoc = `// Welcome to Crumb\n\nfunction hello() {\n  console.log("Hello, world!");\n}\n`;
+const readPreference = (key: string, fallback: string) => {
+  try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
+};
 
 const getFileNameFromPath = (path: string | null) => {
   if (!path) {
@@ -21,13 +27,47 @@ const getFileNameFromPath = (path: string | null) => {
 export default function App() {
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+  const [themeId, setThemeId] = useState(() => getTheme(readPreference('crumb.theme', 'crumb')).id);
+  const [fontSize, setFontSize] = useState(() => {
+    const value = Number(readPreference('crumb.fontSize', '13'));
+    return Number.isFinite(value) ? Math.min(24, Math.max(10, value)) : 13;
+  });
   const [openFilePath, setOpenFilePath] = useState<string | null>(null);
   const [editorContent, setEditorContent] = useState(initialDoc);
   const [lastSavedContent, setLastSavedContent] = useState(initialDoc);
+  const [activeTerminalSessionId, setActiveTerminalSessionId] = useState<string | null>(null);
+  const [terminalFocusRequest, setTerminalFocusRequest] = useState(0);
+  const [terminalFolderRequest, setTerminalFolderRequest] = useState<{ path: string; sequence: number } | null>(null);
+  const [terminalFolderError, setTerminalFolderError] = useState<string | null>(null);
   const openFilePathRef = useRef<string | null>(null);
   const editorContentRef = useRef(initialDoc);
+  const editorRef = useRef<EditorHandle>(null);
 
   const hasUnsavedChanges = editorContent !== lastSavedContent;
+  const theme = getTheme(themeId);
+
+  useEffect(() => {
+    try { localStorage.setItem('crumb.theme', themeId); } catch { /* Storage may be unavailable. */ }
+  }, [themeId]);
+  useEffect(() => {
+    try { localStorage.setItem('crumb.fontSize', String(fontSize)); } catch { /* Storage may be unavailable. */ }
+  }, [fontSize]);
+
+  const handleOpenTerminalFolder = async () => {
+    if (!activeTerminalSessionId) {
+      setTerminalFolderError("Start or select a terminal first.");
+      return;
+    }
+    try {
+      const path = await invoke<string>("get_pty_cwd", { id: activeTerminalSessionId });
+      setTerminalFolderRequest(previous => ({ path, sequence: (previous?.sequence ?? 0) + 1 }));
+      setIsSidebarOpen(true);
+      setTerminalFolderError(null);
+    } catch (error) {
+      setTerminalFolderError(String(error));
+    }
+  };
 
   const handleOpenFile = async (path?: string) => {
     try {
@@ -88,10 +128,30 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Toggle bottom panel on Cmd+J or Ctrl+J
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "p") {
         e.preventDefault();
+        e.stopPropagation();
+        setIsPaletteOpen(open => !open);
+        return;
+      }
+      if (isPaletteOpen) return;
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isPanelOpen) editorRef.current?.focus();
         setIsPanelOpen((prev) => !prev);
+        return;
+      }
+
+      if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && (e.code === "Backquote" || e.key === "`")) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (document.activeElement?.closest(".xterm")) {
+          editorRef.current?.focus();
+        } else {
+          setIsPanelOpen(true);
+          setTerminalFocusRequest(value => value + 1);
+        }
         return;
       }
 
@@ -115,21 +175,32 @@ export default function App() {
         void handleSaveFile();
       }
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [isPaletteOpen, isPanelOpen]);
 
   const activeFileName = getFileNameFromPath(openFilePath);
+  const commands: PaletteCommand[] = [
+    { id: 'theme', label: 'Preferences: Color Theme', detail: `Current: ${theme.name}`, run: () => {} },
+    { id: 'terminal', label: isPanelOpen ? 'View: Hide Terminal' : 'View: Show Terminal', shortcut: 'Ctrl/Cmd J', run: () => setIsPanelOpen(value => !value) },
+    { id: 'explorer', label: isSidebarOpen ? 'View: Hide File Tree' : 'View: Show File Tree', shortcut: 'Ctrl/Cmd B', run: () => setIsSidebarOpen(value => !value) },
+    { id: 'font-up', label: 'Appearance: Increase Font Size', detail: `Currently ${fontSize}px`, run: () => setFontSize(value => Math.min(24, value + 1)) },
+    { id: 'font-down', label: 'Appearance: Decrease Font Size', detail: `Currently ${fontSize}px`, run: () => setFontSize(value => Math.max(10, value - 1)) },
+    { id: 'font-reset', label: 'Appearance: Reset Font Size', detail: '13px', run: () => setFontSize(13) },
+    { id: 'open', label: 'File: Open File', shortcut: 'Ctrl/Cmd O', run: () => void handleOpenFile() },
+    { id: 'save', label: 'File: Save File', shortcut: 'Ctrl/Cmd S', run: () => void handleSaveFile() },
+    { id: 'terminal-folder', label: 'File: Open Current Terminal Folder', run: () => void handleOpenTerminalFolder() },
+  ];
 
   return (
-    <div style={{ height: "100vh", width: "100vw", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <div style={{ ...themeVariables(theme), colorScheme: theme.dark ? 'dark' : 'light', height: "100vh", width: "100vw", display: "flex", flexDirection: "column", overflow: "hidden", backgroundColor: "var(--editor)", color: "var(--text)" }}>
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         {/* Activity Bar */}
         <div style={{
           width: "48px",
           minWidth: "48px",
-          backgroundColor: "#181818",
-          borderRight: "1px solid #333",
+          backgroundColor: "var(--activity)",
+          borderRight: "1px solid var(--border)",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
@@ -139,6 +210,7 @@ export default function App() {
           <button
             onClick={() => setIsSidebarOpen(prev => !prev)}
             title="Explorer (⌘B)"
+            aria-label="Toggle file explorer"
             style={{
               width: "36px",
               height: "36px",
@@ -149,12 +221,12 @@ export default function App() {
               border: "none",
               borderRadius: "6px",
               cursor: "pointer",
-              borderLeft: isSidebarOpen ? "2px solid #e5e5e5" : "2px solid transparent",
+              borderLeft: isSidebarOpen ? "2px solid var(--accent)" : "2px solid transparent",
               opacity: isSidebarOpen ? 1 : 0.5,
               transition: "all 0.15s ease",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.1)";
+              e.currentTarget.style.backgroundColor = "var(--hover)";
               e.currentTarget.style.opacity = "1";
             }}
             onMouseLeave={(e) => {
@@ -162,7 +234,16 @@ export default function App() {
               e.currentTarget.style.opacity = isSidebarOpen ? "1" : "0.5";
             }}
           >
-            <img src={documentIcon} alt="Explorer" style={{ width: "20px", height: "20px" }} />
+            <span className="themed-icon" aria-hidden="true" style={{ width: '20px', height: '20px', maskImage: `url(${documentIcon})`, WebkitMaskImage: `url(${documentIcon})` }} />
+          </button>
+          <div style={{ flex: 1 }} />
+          <button
+            onClick={() => setIsPaletteOpen(true)}
+            title="Commands and themes (Ctrl/Cmd+Shift+P)"
+            aria-label="Open command palette"
+            style={{ width: '36px', height: '36px', marginBottom: '10px', border: 'none', borderRadius: '6px', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: '19px' }}
+          >
+            ›
           </button>
         </div>
 
@@ -170,14 +251,19 @@ export default function App() {
         <div style={{
           width: isSidebarOpen ? "250px" : "0px",
           minWidth: isSidebarOpen ? "250px" : "0px",
-          borderRight: isSidebarOpen ? "1px solid #333" : "none",
-          backgroundColor: "#1e1e1e",
+          borderRight: isSidebarOpen ? "1px solid var(--border)" : "none",
+          backgroundColor: "var(--sidebar)",
           overflow: "hidden",
           transition: "width 0.15s ease, min-width 0.15s ease",
         }}>
-          <FileExplorer onFileSelect={handleOpenFile} />
+          <FileExplorer
+            onFileSelect={handleOpenFile}
+            terminalFolderRequest={terminalFolderRequest}
+            onOpenTerminalFolder={handleOpenTerminalFolder}
+            terminalFolderError={terminalFolderError}
+          />
         </div>
-        
+
         {/* Main Editor */}
         <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
           <div
@@ -187,9 +273,9 @@ export default function App() {
               alignItems: "center",
               justifyContent: "space-between",
               padding: "0 12px",
-              borderBottom: "1px solid #333",
-              backgroundColor: "#1f1f1f",
-              color: "#b3b3b3",
+              borderBottom: "1px solid var(--border)",
+              backgroundColor: "var(--panel-header)",
+              color: "var(--muted)",
               fontSize: "12px",
               fontFamily: "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
             }}
@@ -197,26 +283,35 @@ export default function App() {
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {activeFileName}
             </span>
-            {hasUnsavedChanges && <span style={{ color: "#e8c547" }}>Unsaved</span>}
+            {hasUnsavedChanges && <span style={{ color: "var(--warning)" }}>Unsaved</span>}
           </div>
           <div style={{ flex: 1, overflow: "hidden" }}>
-            <Editor doc={editorContent} onChange={handleEditorChange} />
+            <Editor ref={editorRef} doc={editorContent} theme={theme} fontSize={fontSize} onChange={handleEditorChange} />
           </div>
         </div>
       </div>
-      
+
       {/* Bottom Panel */}
-      <div 
-        style={{ 
-          height: isPanelOpen ? "40%" : "0", 
-          borderTop: isPanelOpen ? "1px solid #333" : "none", 
-          backgroundColor: "#1e1e1e",
+      <div
+        style={{
+          height: isPanelOpen ? "40%" : "0",
+          borderTop: isPanelOpen ? "1px solid var(--border)" : "none",
+          backgroundColor: "var(--panel)",
           transition: "height 0.2s ease",
-          display: isPanelOpen ? "block" : "none" 
+          display: isPanelOpen ? "block" : "none"
         }}
       >
-        <BottomPanel onClose={() => setIsPanelOpen(false)} />
+        <BottomPanel onClose={() => setIsPanelOpen(false)} onActiveSessionChange={setActiveTerminalSessionId} theme={theme} fontSize={fontSize} focusRequest={terminalFocusRequest} />
       </div>
+      {isPaletteOpen && (
+        <CommandPalette
+          commands={commands}
+          themes={themes}
+          currentThemeId={themeId}
+          onThemeChange={setThemeId}
+          onClose={() => setIsPaletteOpen(false)}
+        />
+      )}
     </div>
   );
 }

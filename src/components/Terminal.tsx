@@ -4,6 +4,21 @@ import { FitAddon } from '@xterm/addon-fit';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import '@xterm/xterm/css/xterm.css';
+import type { Theme } from '../lib/themes';
+
+function terminalTheme(theme: Theme) {
+  const { colors, syntax } = theme;
+  return {
+    background: colors.terminal, foreground: colors.text, cursor: colors.accent,
+    selectionBackground: colors.selection,
+    black: colors.activity, red: syntax.property, green: syntax.string,
+    yellow: syntax.type, blue: syntax.function, magenta: syntax.keyword,
+    cyan: syntax.operator, white: colors.text,
+    brightBlack: colors.subtle, brightRed: syntax.tag, brightGreen: syntax.string,
+    brightYellow: syntax.type, brightBlue: syntax.function,
+    brightMagenta: syntax.keyword, brightCyan: syntax.operator, brightWhite: colors.text,
+  };
+}
 
 interface PtyPayload {
   id: string;
@@ -16,31 +31,34 @@ interface TerminalProps {
   shell?: string;
   onClick: () => void;
   onTitleChange?: (title: string) => void;
+  onSessionChange?: (id: string, sessionId: string | null) => void;
+  theme: Theme;
+  fontSize: number;
+  focusRequest: number;
 }
 
-export default function Terminal({ id, isActive, shell, onClick, onTitleChange }: TerminalProps) {
+export default function Terminal({ id, isActive, shell, onClick, onTitleChange, onSessionChange, theme, fontSize, focusRequest }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
   const sessionIdRef = useRef(`${id}-${Date.now()}-${Math.floor(Math.random() * 1000)}`);
   const sessionId = sessionIdRef.current;
 
   useEffect(() => {
     if (!terminalRef.current) return;
+    onSessionChange?.(id, sessionId);
 
     // Initialize xterm.js
     const term = new XTerm({
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-      fontSize: 13,
-      theme: {
-        background: '#0a0a0c', // Deeper distinction from editor
-        foreground: '#cccccc',
-        cursor: '#ffffff',
-      },
+      fontSize,
+      theme: terminalTheme(theme),
       cursorBlink: true,
     });
     xtermRef.current = term;
 
     const fitAddon = new FitAddon();
+    fitAddonRef.current = fitAddon;
     term.loadAddon(fitAddon);
 
     term.open(terminalRef.current);
@@ -93,15 +111,30 @@ export default function Terminal({ id, isActive, shell, onClick, onTitleChange }
     observer.observe(terminalRef.current);
 
     return () => {
+      onSessionChange?.(id, null);
       clearTimeout(spawnTimeout);
       observer.disconnect();
       if (resizeListener) resizeListener.dispose();
       titleListener.dispose();
       term.dispose();
+      xtermRef.current = null;
+      fitAddonRef.current = null;
       if (unlistenPromise) unlistenPromise.then(un => un());
       invoke('kill_pty', { id: sessionId }).catch(console.error);
     };
   }, []);
+
+  useEffect(() => {
+    const term = xtermRef.current;
+    if (!term) return;
+    term.options.theme = terminalTheme(theme);
+    term.options.fontSize = fontSize;
+    if (term.element?.clientWidth) fitAddonRef.current?.fit();
+  }, [theme, fontSize]);
+
+  useEffect(() => {
+    if (focusRequest > 0 && isActive) xtermRef.current?.focus();
+  }, [focusRequest, isActive]);
 
   return (
     <div
@@ -111,7 +144,7 @@ export default function Terminal({ id, isActive, shell, onClick, onTitleChange }
       style={{
         width: '100%',
         height: '100%',
-        backgroundColor: '#0a0a0c',
+        backgroundColor: 'var(--terminal)',
         padding: '8px',
         boxSizing: 'border-box',
         opacity: isActive ? 1.0 : 0.6,

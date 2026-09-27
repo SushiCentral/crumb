@@ -11,6 +11,8 @@ Crumb is a cross-platform code editor inspired by VS Code. It features a code ed
 - **Integrated terminal** panel with support for multiple terminals and split views
 - **Collapsible panels** — toggle the sidebar and bottom panel independently
 - **Keyboard shortcuts** for common actions
+- **Color themes** for the full interface, editor syntax, and terminal
+- **Command palette** for themes, layout, font size, and file actions
 
 ## Tech Stack
 
@@ -53,6 +55,16 @@ npm run tauri:dev
 - `Ctrl/Cmd + S` — Save file
 - `Ctrl/Cmd + B` — Toggle file explorer sidebar
 - `Ctrl/Cmd + J` — Toggle bottom panel (terminal / output / problems)
+- `Ctrl + \`` — Open and focus the terminal; press again to return to the editor
+- `Ctrl/Cmd + Shift + P` — Open the command palette
+
+## Themes and commands
+
+Open the command palette with `Ctrl/Cmd + Shift + P`, then choose **Preferences: Color Theme**. Crumb includes Crumb, One Dark, Dracula, Catppuccin Mocha, and Catppuccin Latte. The chosen theme and font size are saved locally and restored on restart.
+
+The palette also lets you toggle the terminal and file tree, change or reset the editor and terminal font size, open or save a file, and open the selected terminal's current folder.
+
+The One Dark colors are adapted from [One Dark Pro](https://github.com/Binaryify/OneDark-Pro) (MIT); Dracula colors from [Dracula](https://github.com/dracula/dracula-theme) (MIT); and Catppuccin colors from [Catppuccin](https://github.com/catppuccin/palette) (MIT). Crumb's interface colors are arranged independently for its layout.
 
 ## Project Structure
 

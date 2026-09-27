@@ -8,6 +8,7 @@ use tauri::{Emitter, State};
 struct PtySession {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+    process_id: Option<u32>,
 }
 
 struct PtyState {
@@ -77,7 +78,8 @@ fn spawn_pty(
 
     let mut cmd = CommandBuilder::new(default_shell);
     cmd.env("TERM", "xterm-256color");
-    let _child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let process_id = child.process_id();
 
     drop(pair.slave);
 
@@ -91,6 +93,7 @@ fn spawn_pty(
             PtySession {
                 writer: Arc::new(Mutex::new(writer)),
                 master: Arc::new(Mutex::new(pair.master)),
+                process_id,
             },
         );
     }
@@ -116,6 +119,47 @@ fn spawn_pty(
     });
 
     Ok(())
+}
+
+#[tauri::command]
+fn get_pty_cwd(id: String, state: State<'_, PtyState>) -> Result<String, String> {
+    let process_id = state
+        .sessions
+        .lock()
+        .map_err(|e| e.to_string())?
+        .get(&id)
+        .and_then(|session| session.process_id)
+        .ok_or_else(|| "The selected terminal is not running yet.".to_string())?;
+
+    #[cfg(target_os = "linux")]
+    {
+        return std::fs::read_link(format!("/proc/{process_id}/cwd"))
+            .map(|path| path.to_string_lossy().into_owned())
+            .map_err(|e| format!("Could not read the terminal directory: {e}"));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let output = std::process::Command::new("lsof")
+            .args(["-a", "-p", &process_id.to_string(), "-d", "cwd", "-Fn"])
+            .output()
+            .map_err(|e| format!("Could not read the terminal directory: {e}"))?;
+        if output.status.success() {
+            if let Some(path) = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .find_map(|line| line.strip_prefix('n'))
+            {
+                return Ok(path.to_string());
+            }
+        }
+        return Err("Could not read the terminal directory.".to_string());
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = process_id;
+        Err("Opening the terminal directory is not supported on this platform yet.".to_string())
+    }
 }
 
 #[tauri::command]
@@ -168,6 +212,7 @@ pub fn run() {
             write_pty,
             resize_pty,
             kill_pty,
+            get_pty_cwd,
             get_available_shells
         ])
         .run(tauri::generate_context!())
