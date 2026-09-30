@@ -41,7 +41,7 @@ body,
 .explorer-header { display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 8px 7px; border-bottom: 1px solid var(--border); }
 .explorer-header strong { font-size: 11px; letter-spacing: .5px; }
 .explorer-actions { display: flex; align-items: center; gap: 2px; }
-.explorer-actions button { display: flex; align-items: center; justify-content: center; min-height: 24px; padding: 2px 4px; border: 0; border-radius: 4px; background: none; color: var(--muted); cursor: pointer; font-size: 12px; }
+.explorer-actions button { display: flex; align-items: center; justify-content: center; flex: none; min-height: 24px; padding: 2px 4px; border: 0; border-radius: 4px; background: none; color: var(--muted); cursor: pointer; font-size: 12px; white-space: nowrap; }
 .explorer-actions button:hover, .tree-more:hover { background: var(--hover); color: var(--text); }
 .explorer-tree { flex: 1; overflow: auto; }
 .explorer-root { padding: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
@@ -52,6 +52,7 @@ body,
 .tree-row.active { background: var(--surface); color: var(--text); }
 .tree-chevron { flex: none; width: 12px; text-align: center; color: var(--muted); }
 .tree-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.tree-icon { flex: none; color: var(--muted); }
 .tree-more { opacity: 0; flex: none; border: 0; border-radius: 3px; background: none; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 18px; }
 .tree-row:hover .tree-more, .tree-more:focus { opacity: 1; }
 .tree-error { padding: 8px; color: var(--warning); font-size: 12px; overflow-wrap: anywhere; }
@@ -60,17 +61,12 @@ body,
 .tree-menu button { padding: 7px 10px; border: 0; border-radius: 3px; background: none; color: var(--text); text-align: left; cursor: pointer; }
 .tree-menu button:hover { background: var(--hover); }
 
-.themed-icon {
-  display: inline-block;
-  flex: none;
-  background-color: var(--muted);
-  mask-size: contain;
-  mask-repeat: no-repeat;
-  mask-position: center;
-  -webkit-mask-size: contain;
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-}
+.resize-handle { flex: none; position: relative; z-index: 2; background: var(--border); touch-action: none; }
+.resize-handle::after { content: ''; position: absolute; inset: 0; background: transparent; }
+.resize-handle:hover::after, .resize-handle:focus-visible::after { background: var(--accent); }
+.resize-handle.vertical { width: 5px; cursor: col-resize; }
+.resize-handle.horizontal { height: 5px; cursor: row-resize; }
+.resize-handle:focus-visible { outline: 1px solid var(--accent); }
 
 /* Bottom Panel UI */
 .bottom-panel-container {

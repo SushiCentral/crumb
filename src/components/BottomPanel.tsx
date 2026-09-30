@@ -56,11 +56,13 @@ interface BottomPanelProps {
   theme: Theme;
   fontSize: number;
   focusRequest: number;
+  workingDirectory: string | null;
 }
 
 interface TerminalInstance {
   id: string;
   shell?: string;
+  cwd?: string | null;
 }
 
 interface TerminalGroup {
@@ -69,13 +71,13 @@ interface TerminalGroup {
   activeTerminalId: string;
 }
 
-export default function BottomPanel({ onClose, onActiveSessionChange, theme, fontSize, focusRequest }: BottomPanelProps) {
+export default function BottomPanel({ onClose, onActiveSessionChange, theme, fontSize, focusRequest, workingDirectory }: BottomPanelProps) {
   const [activeTab, setActiveTab] = useState<'terminal' | 'output' | 'problems'>('terminal');
   
   // Terminal Multiplexing State - Initialized lazily to avoid Date clock drifts in strict mode
   const [groups, setGroups] = useState<TerminalGroup[]>(() => {
-    const termId = `term-${Date.now()}`;
-    return [{ id: `group-${Date.now()}`, terminals: [{ id: termId }], activeTerminalId: termId }];
+    const termId = crypto.randomUUID();
+    return [{ id: crypto.randomUUID(), terminals: [{ id: termId, cwd: workingDirectory }], activeTerminalId: termId }];
   });
   const [activeGroupId, setActiveGroupId] = useState<string>(groups[0].id);
   const [titles, setTitles] = useState<Record<string, string>>({});
@@ -99,23 +101,23 @@ export default function BottomPanel({ onClose, onActiveSessionChange, theme, fon
   }, [focusRequest]);
 
   const handleNewTerminal = (shell?: string) => {
-    const newTermId = `term-${Date.now()}`;
-    const newGroupId = `group-${Date.now()}`;
+    const newTermId = crypto.randomUUID();
+    const newGroupId = crypto.randomUUID();
     setGroups(prev => [...prev, {
       id: newGroupId,
-      terminals: [{ id: newTermId, shell }],
+      terminals: [{ id: newTermId, shell, cwd: workingDirectory }],
       activeTerminalId: newTermId
     }]);
     setActiveGroupId(newGroupId);
   };
 
   const handleSplitTerminal = (shell?: string) => {
-    const newTermId = `term-${Date.now()}`;
+    const newTermId = crypto.randomUUID();
     setGroups(prev => prev.map(g => {
       if (g.id === activeGroupId) {
         return {
           ...g,
-          terminals: [...g.terminals, { id: newTermId, shell }],
+          terminals: [...g.terminals, { id: newTermId, shell, cwd: workingDirectory }],
           activeTerminalId: newTermId
         };
       }
@@ -146,9 +148,9 @@ export default function BottomPanel({ onClose, onActiveSessionChange, theme, fon
       // Entire group killed
       nextGroups.splice(groupIndex, 1);
       if (nextGroups.length === 0) {
-        const fallbackTermId = `term-${Date.now()}`;
-        const fallbackGroupId = `group-${Date.now()}`;
-        nextGroups = [{ id: fallbackGroupId, terminals: [{ id: fallbackTermId }], activeTerminalId: fallbackTermId }];
+        const fallbackTermId = crypto.randomUUID();
+        const fallbackGroupId = crypto.randomUUID();
+        nextGroups = [{ id: fallbackGroupId, terminals: [{ id: fallbackTermId, cwd: workingDirectory }], activeTerminalId: fallbackTermId }];
         nextActiveGroupId = fallbackGroupId;
         if (onClose) onClose(); // Gracefully collapse UI since everything died
       } else {
@@ -285,6 +287,7 @@ export default function BottomPanel({ onClose, onActiveSessionChange, theme, fon
                       fontSize={fontSize}
                       focusRequest={activeTab === 'terminal' ? focusRequest : 0}
                       shell={term.shell}
+                      cwd={term.cwd}
                       isActive={activeGroupId === group.id && group.activeTerminalId === term.id}
                       onClick={() => {
                         setActiveGroupId(group.id);

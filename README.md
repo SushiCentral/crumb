@@ -8,8 +8,8 @@ Crumb is a cross-platform code editor inspired by VS Code. It features a code ed
 
 - **Code editor** powered by CodeMirror 6 with syntax highlighting
 - **File explorer** sidebar with recursive folder browsing
-- **Integrated terminal** panel with support for multiple terminals and split views
-- **Collapsible panels** — toggle the sidebar and bottom panel independently
+- **Integrated terminal** panel with support for multiple terminals and split views; new terminals start in the Explorer folder
+- **Resizable panels** — drag the sidebar and bottom panel edges, or toggle them independently
 - **Keyboard shortcuts** for common actions
 - **Color themes** for the full interface, editor syntax, and terminal
 - **Command palette** for themes, layout, font size, and file actions

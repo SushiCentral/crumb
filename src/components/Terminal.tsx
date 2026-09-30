@@ -29,6 +29,7 @@ interface TerminalProps {
   id: string;
   isActive: boolean;
   shell?: string;
+  cwd?: string | null;
   onClick: () => void;
   onTitleChange?: (title: string) => void;
   onSessionChange?: (id: string, sessionId: string | null) => void;
@@ -37,7 +38,7 @@ interface TerminalProps {
   focusRequest: number;
 }
 
-export default function Terminal({ id, isActive, shell, onClick, onTitleChange, onSessionChange, theme, fontSize, focusRequest }: TerminalProps) {
+export default function Terminal({ id, isActive, shell, cwd, onClick, onTitleChange, onSessionChange, theme, fontSize, focusRequest }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -71,12 +72,12 @@ export default function Terminal({ id, isActive, shell, onClick, onTitleChange, 
     const spawnTimeout = setTimeout(() => {
       fitAddon.fit();
 
-      invoke('spawn_pty', { id: sessionId, rows: term.rows, cols: term.cols, shell }).catch((err) => {
-        console.error(err);
-        term.write(`\r\n\x1b[1;31mError spawning PTY: ${err}\x1b[0m\r\n`);
-      }).then(() => {
+      invoke('spawn_pty', { id: sessionId, rows: term.rows, cols: term.cols, shell, cwd }).then(() => {
         // macOS Zsh specific hack to clear the three buggy initialization prompts reliably
         setTimeout(() => invoke('write_pty', { id: sessionId, data: '\x0c' }).catch(console.error), 250);
+      }).catch((err) => {
+        console.error(err);
+        term.write(`\r\n\x1b[1;31mError spawning PTY: ${err}\x1b[0m\r\n`);
       });
 
       unlistenPromise = listen<PtyPayload>('pty-output', (event) => {

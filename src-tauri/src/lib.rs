@@ -54,6 +54,7 @@ fn spawn_pty(
     rows: u16,
     cols: u16,
     shell: Option<String>,
+    cwd: Option<String>,
     app_handle: tauri::AppHandle,
     state: State<'_, PtyState>,
 ) -> Result<(), String> {
@@ -78,6 +79,12 @@ fn spawn_pty(
 
     let mut cmd = CommandBuilder::new(default_shell);
     cmd.env("TERM", "xterm-256color");
+    if let Some(directory) = cwd {
+        if !std::path::Path::new(&directory).is_dir() {
+            return Err(format!("Terminal directory is unavailable: {directory}"));
+        }
+        cmd.cwd(directory);
+    }
     let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     let process_id = child.process_id();
 

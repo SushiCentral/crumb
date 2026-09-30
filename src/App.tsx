@@ -7,7 +7,7 @@ import BottomPanel from "./components/BottomPanel";
 import FileExplorer from "./components/FileExplorer";
 import CommandPalette, { type PaletteCommand } from "./components/CommandPalette";
 import { getTheme, themes, themeVariables } from "./lib/themes";
-import documentIcon from "./assets/document.svg";
+import { FolderIcon } from "./components/Icons";
 import "./App.css";
 
 const initialDoc = `// Welcome to Crumb\n\nfunction hello() {\n  console.log("Hello, world!");\n}\n`;
@@ -37,6 +37,9 @@ const getFileNameFromPath = (path: string | null) => {
 export default function App() {
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [panelHeight, setPanelHeight] = useState(() => Math.round(window.innerHeight * 0.4));
+  const [explorerRootPath, setExplorerRootPath] = useState<string | null>(null);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [themeId, setThemeId] = useState(() => getTheme(readPreference('crumb.theme', 'crumb')).id);
   const [fontSize, setFontSize] = useState(() => {
@@ -54,6 +57,8 @@ export default function App() {
   const tabsRef = useRef(tabs);
   const activeTabIdRef = useRef(activeTabId);
   const editorRef = useRef<EditorHandle>(null);
+  const sidebarDraggingRef = useRef(false);
+  const panelDraggingRef = useRef(false);
 
   const activeTab = tabs.find(tab => tab.id === activeTabId) ?? tabs[0];
   const updateTabs = (update: (current: EditorTab[]) => EditorTab[]) => {
@@ -284,7 +289,7 @@ export default function App() {
 
   return (
     <div style={{ ...themeVariables(theme), colorScheme: theme.dark ? 'dark' : 'light', height: "100vh", width: "100vw", display: "flex", flexDirection: "column", overflow: "hidden", backgroundColor: "var(--editor)", color: "var(--text)" }}>
-      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+      <div style={{ flex: 1, minHeight: 0, display: "flex", overflow: "hidden" }}>
         {/* Activity Bar */}
         <div style={{
           width: "48px",
@@ -324,7 +329,7 @@ export default function App() {
               e.currentTarget.style.opacity = isSidebarOpen ? "1" : "0.5";
             }}
           >
-            <span className="themed-icon" aria-hidden="true" style={{ width: '20px', height: '20px', maskImage: `url(${documentIcon})`, WebkitMaskImage: `url(${documentIcon})` }} />
+            <FolderIcon width={20} height={20} />
           </button>
           <div style={{ flex: 1 }} />
           <button
@@ -339,26 +344,40 @@ export default function App() {
 
         {/* Sidebar / File Explorer */}
         <div style={{
-          width: isSidebarOpen ? "250px" : "0px",
-          minWidth: isSidebarOpen ? "250px" : "0px",
-          borderRight: isSidebarOpen ? "1px solid var(--border)" : "none",
+          width: isSidebarOpen ? `${sidebarWidth}px` : "0px",
+          minWidth: isSidebarOpen ? `${sidebarWidth}px` : "0px",
+          maxWidth: 'calc(100vw - 280px)',
           backgroundColor: "var(--sidebar)",
           overflow: "hidden",
-          transition: "width 0.15s ease, min-width 0.15s ease",
+          transition: sidebarDraggingRef.current ? 'none' : 'width 0.15s ease, min-width 0.15s ease',
         }}>
           <FileExplorer
             onFileSelect={handleOpenFile}
             activeFilePath={activeTab.path}
             onRename={handleExplorerRename}
             onDelete={handleExplorerDelete}
+            onRootPathChange={setExplorerRootPath}
             terminalFolderRequest={terminalFolderRequest}
             onOpenTerminalFolder={handleOpenTerminalFolder}
             terminalFolderError={terminalFolderError}
           />
         </div>
 
+        {isSidebarOpen && <div className="resize-handle vertical" role="separator" aria-label="Resize file tree" aria-orientation="vertical" aria-valuemin={160} aria-valuemax={Math.max(160, window.innerWidth - 268)} aria-valuenow={sidebarWidth} tabIndex={0}
+          onPointerDown={event => { event.preventDefault(); sidebarDraggingRef.current = true; event.currentTarget.setPointerCapture(event.pointerId); }}
+          onPointerMove={event => {
+            if (!sidebarDraggingRef.current) return;
+            const left = event.currentTarget.parentElement?.getBoundingClientRect().left ?? 0;
+            const available = event.currentTarget.parentElement?.clientWidth ?? window.innerWidth;
+            setSidebarWidth(Math.max(160, Math.min(available - 48 - 220, event.clientX - left - 48)));
+          }}
+          onPointerUp={event => { sidebarDraggingRef.current = false; event.currentTarget.releasePointerCapture(event.pointerId); }}
+          onLostPointerCapture={() => { sidebarDraggingRef.current = false; }}
+          onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setSidebarWidth(width => Math.max(160, Math.min(window.innerWidth - 268, width + (event.key === 'ArrowRight' ? 10 : -10)))); } }}
+        />}
+
         {/* Main Editor */}
-        <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        <div style={{ flex: 1, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
           <div className="editor-tabs" role="tablist" aria-label="Open files">
             {tabs.map(tab => (
               <div key={tab.id} className={`editor-tab ${tab.id === activeTabId ? 'active' : ''}`} role="tab" aria-selected={tab.id === activeTabId} title={tab.path ?? 'Untitled'}>
@@ -374,17 +393,28 @@ export default function App() {
         </div>
       </div>
 
+      {isPanelOpen && <div className="resize-handle horizontal" role="separator" aria-label="Resize bottom panel" aria-orientation="horizontal" aria-valuemin={120} aria-valuemax={Math.max(120, window.innerHeight - 160)} aria-valuenow={panelHeight} tabIndex={0}
+        onPointerDown={event => { event.preventDefault(); panelDraggingRef.current = true; event.currentTarget.setPointerCapture(event.pointerId); }}
+        onPointerMove={event => {
+          if (!panelDraggingRef.current) return;
+          const bottom = event.currentTarget.parentElement?.getBoundingClientRect().bottom ?? window.innerHeight;
+          const available = event.currentTarget.parentElement?.clientHeight ?? window.innerHeight;
+          setPanelHeight(Math.max(120, Math.min(available - 160, bottom - event.clientY)));
+        }}
+        onPointerUp={event => { panelDraggingRef.current = false; event.currentTarget.releasePointerCapture(event.pointerId); }}
+        onLostPointerCapture={() => { panelDraggingRef.current = false; }}
+        onKeyDown={event => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setPanelHeight(height => Math.max(120, Math.min(window.innerHeight - 160, height + (event.key === 'ArrowUp' ? 10 : -10)))); } }}
+      />}
       {/* Bottom Panel */}
       <div
         style={{
-          height: isPanelOpen ? "40%" : "0",
-          borderTop: isPanelOpen ? "1px solid var(--border)" : "none",
+          height: isPanelOpen ? `${panelHeight}px` : "0",
+          maxHeight: 'calc(100vh - 160px)',
           backgroundColor: "var(--panel)",
-          transition: "height 0.2s ease",
           display: isPanelOpen ? "block" : "none"
         }}
       >
-        <BottomPanel onClose={() => setIsPanelOpen(false)} onActiveSessionChange={setActiveTerminalSessionId} theme={theme} fontSize={fontSize} focusRequest={terminalFocusRequest} />
+        <BottomPanel onClose={() => setIsPanelOpen(false)} onActiveSessionChange={setActiveTerminalSessionId} theme={theme} fontSize={fontSize} focusRequest={terminalFocusRequest} workingDirectory={explorerRootPath} />
       </div>
       {isPaletteOpen && (
         <CommandPalette

@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { create, exists, mkdir, readDir, remove, rename, watch, type DirEntry } from '@tauri-apps/plugin-fs';
-import documentIcon from '../assets/document.svg';
-import folderOpenIcon from '../assets/folder-open.svg';
+import { FileIcon, FolderIcon, NewFileIcon, NewFolderIcon } from './Icons';
 
 type Action = 'new-file' | 'new-folder' | 'rename' | 'delete';
 type Target = { path: string; name: string; isDirectory: boolean };
@@ -33,7 +32,7 @@ function TreeNode({ entry, path, level, refresh, activeFilePath, onFileSelect, o
       onClick={() => entry.isDirectory ? setExpanded(value => !value) : onFileSelect(path)}
       onContextMenu={event => onMenu(event, target)}>
       <span className="tree-chevron">{entry.isDirectory ? expanded ? '▾' : '▸' : ''}</span>
-      <span className="themed-icon" aria-hidden="true" style={{ width: 15, height: 15, maskImage: `url(${entry.isDirectory ? folderOpenIcon : documentIcon})`, WebkitMaskImage: `url(${entry.isDirectory ? folderOpenIcon : documentIcon})` }} />
+      {entry.isDirectory ? <FolderIcon className="tree-icon" /> : <FileIcon className="tree-icon" />}
       <span className="tree-name">{entry.name}</span>
       <button className="tree-more" aria-label={`Actions for ${entry.name}`} title="File actions"
         onClick={event => { event.stopPropagation(); onMenu(event, target); }}>⋯</button>
@@ -49,12 +48,13 @@ interface Props {
   activeFilePath: string | null;
   onRename: (oldPath: string, newPath: string, isDirectory: boolean) => void;
   onDelete: (path: string, isDirectory: boolean) => void;
+  onRootPathChange: (path: string | null) => void;
   terminalFolderRequest: { path: string; sequence: number } | null;
   onOpenTerminalFolder: () => void;
   terminalFolderError: string | null;
 }
 
-export default function FileExplorer({ onFileSelect, activeFilePath, onRename, onDelete, terminalFolderRequest, onOpenTerminalFolder, terminalFolderError }: Props) {
+export default function FileExplorer({ onFileSelect, activeFilePath, onRename, onDelete, onRootPathChange, terminalFolderRequest, onOpenTerminalFolder, terminalFolderError }: Props) {
   const [rootPath, setRootPath] = useState<string | null>(null);
   const [rootFiles, setRootFiles] = useState<DirEntry[]>([]);
   const [refresh, setRefresh] = useState(0);
@@ -63,6 +63,8 @@ export default function FileExplorer({ onFileSelect, activeFilePath, onRename, o
   const [name, setName] = useState('');
   const [menu, setMenu] = useState<{ x: number; y: number; target: Target } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { onRootPathChange(rootPath); }, [rootPath, onRootPathChange]);
 
   useEffect(() => {
     if (terminalFolderRequest) { setRootPath(terminalFolderRequest.path); setRefresh(value => value + 1); }
@@ -129,11 +131,11 @@ export default function FileExplorer({ onFileSelect, activeFilePath, onRename, o
   return <div className="file-explorer">
     <div className="explorer-header"><strong>EXPLORER</strong><div className="explorer-actions">
       {rootTarget && <>
-        <button title="New File" aria-label="New File" onClick={() => start('new-file', rootTarget)}>＋</button>
-        <button title="New Folder" aria-label="New Folder" onClick={() => start('new-folder', rootTarget)}>▣</button>
+        <button title="New File" aria-label="New File" onClick={() => start('new-file', rootTarget)}><NewFileIcon /></button>
+        <button title="New Folder" aria-label="New Folder" onClick={() => start('new-folder', rootTarget)}><NewFolderIcon /></button>
       </>}
       <button title="Open current terminal's folder" onClick={onOpenTerminalFolder}>Terminal folder</button>
-      <button title="Open Folder" aria-label="Open Folder" onClick={chooseFolder}><span className="themed-icon" aria-hidden="true" style={{ width: 16, height: 16, maskImage: `url(${folderOpenIcon})`, WebkitMaskImage: `url(${folderOpenIcon})` }} /></button>
+      <button title="Open Folder" aria-label="Open Folder" onClick={chooseFolder}><FolderIcon /></button>
     </div></div>
     {(terminalFolderError || error) && <div className="tree-error" role="alert">{terminalFolderError || error}</div>}
     <div className="explorer-tree">{rootPath ? <>
