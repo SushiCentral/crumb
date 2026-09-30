@@ -6,6 +6,8 @@ import { createSyntaxHighlighting } from '../lib/highlight';
 import type { Theme } from '../lib/themes';
 
 interface EditorProps {
+  tabId: string;
+  openTabIds: string[];
   doc: string;
   theme: Theme;
   fontSize: number;
@@ -47,44 +49,62 @@ function editorAppearance(theme: Theme, fontSize: number) {
   }, { dark: theme.dark });
 }
 
-const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ doc, theme, fontSize, onChange }, ref) {
+const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, openTabIds, doc, theme, fontSize, onChange }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const statesRef = useRef(new Map<string, EditorState>());
+  const activeTabRef = useRef(tabId);
   const onChangeRef = useRef(onChange);
 
   useImperativeHandle(ref, () => ({ focus: () => viewRef.current?.focus() }), []);
 
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
 
+  const createState = (content: string, currentTheme: Theme, currentFontSize: number) => EditorState.create({
+    doc: content,
+    extensions: [
+      syntaxCompartment.of(Prec.highest(createSyntaxHighlighting(currentTheme))),
+      basicSetup,
+      javascript(),
+      appearanceCompartment.of(editorAppearance(currentTheme, currentFontSize)),
+      EditorView.updateListener.of(update => {
+        if (!update.docChanged) return;
+        statesRef.current.set(activeTabRef.current, update.state);
+        const external = update.transactions.some(transaction => transaction.annotation(externalDocUpdate));
+        if (!external) onChangeRef.current?.(update.state.doc.toString());
+      }),
+    ],
+  });
+
   useEffect(() => {
     if (!containerRef.current) return;
-    const state = EditorState.create({
-      doc,
-      extensions: [
-        syntaxCompartment.of(Prec.highest(createSyntaxHighlighting(theme))),
-        basicSetup,
-        javascript(),
-        appearanceCompartment.of(editorAppearance(theme, fontSize)),
-        EditorView.updateListener.of(update => {
-          if (!update.docChanged) return;
-          const external = update.transactions.some(transaction => transaction.annotation(externalDocUpdate));
-          if (!external) onChangeRef.current?.(update.state.doc.toString());
-        }),
-      ],
-    });
+    const state = createState(doc, theme, fontSize);
     const view = new EditorView({ state, parent: containerRef.current });
     viewRef.current = view;
+    statesRef.current.set(tabId, state);
     return () => { viewRef.current = null; view.destroy(); };
   }, []);
 
   useEffect(() => {
-    viewRef.current?.dispatch({
+    const view = viewRef.current;
+    if (!view) return;
+    if (activeTabRef.current !== tabId) {
+      statesRef.current.set(activeTabRef.current, view.state);
+      activeTabRef.current = tabId;
+      view.setState(statesRef.current.get(tabId) ?? createState(doc, theme, fontSize));
+    }
+    view.dispatch({
       effects: [
         syntaxCompartment.reconfigure(Prec.highest(createSyntaxHighlighting(theme))),
         appearanceCompartment.reconfigure(editorAppearance(theme, fontSize)),
       ],
     });
-  }, [theme, fontSize]);
+  }, [tabId, theme, fontSize]);
+
+  useEffect(() => {
+    const open = new Set(openTabIds);
+    for (const id of statesRef.current.keys()) if (!open.has(id)) statesRef.current.delete(id);
+  }, [openTabIds]);
 
   useEffect(() => {
     const view = viewRef.current;

@@ -11,6 +11,16 @@ import documentIcon from "./assets/document.svg";
 import "./App.css";
 
 const initialDoc = `// Welcome to Crumb\n\nfunction hello() {\n  console.log("Hello, world!");\n}\n`;
+interface EditorTab {
+  id: string;
+  path: string | null;
+  content: string;
+  savedContent: string | null;
+}
+
+const newUntitledTab = (): EditorTab => ({
+  id: crypto.randomUUID(), path: null, content: initialDoc, savedContent: initialDoc,
+});
 const readPreference = (key: string, fallback: string) => {
   try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
 };
@@ -33,18 +43,28 @@ export default function App() {
     const value = Number(readPreference('crumb.fontSize', '13'));
     return Number.isFinite(value) ? Math.min(24, Math.max(10, value)) : 13;
   });
-  const [openFilePath, setOpenFilePath] = useState<string | null>(null);
-  const [editorContent, setEditorContent] = useState(initialDoc);
-  const [lastSavedContent, setLastSavedContent] = useState(initialDoc);
+  const [tabs, setTabs] = useState<EditorTab[]>(() => [newUntitledTab()]);
+  const [activeTabId, setActiveTabId] = useState(() => tabs[0].id);
+  const [pendingCloseId, setPendingCloseId] = useState<string | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [activeTerminalSessionId, setActiveTerminalSessionId] = useState<string | null>(null);
   const [terminalFocusRequest, setTerminalFocusRequest] = useState(0);
   const [terminalFolderRequest, setTerminalFolderRequest] = useState<{ path: string; sequence: number } | null>(null);
   const [terminalFolderError, setTerminalFolderError] = useState<string | null>(null);
-  const openFilePathRef = useRef<string | null>(null);
-  const editorContentRef = useRef(initialDoc);
+  const tabsRef = useRef(tabs);
+  const activeTabIdRef = useRef(activeTabId);
   const editorRef = useRef<EditorHandle>(null);
 
-  const hasUnsavedChanges = editorContent !== lastSavedContent;
+  const activeTab = tabs.find(tab => tab.id === activeTabId) ?? tabs[0];
+  const updateTabs = (update: (current: EditorTab[]) => EditorTab[]) => {
+    const next = update(tabsRef.current);
+    tabsRef.current = next;
+    setTabs(next);
+  };
+  const activateTab = (id: string) => {
+    activeTabIdRef.current = id;
+    setActiveTabId(id);
+  };
   const theme = getTheme(themeId);
 
   useEffect(() => {
@@ -84,46 +104,96 @@ export default function App() {
         selectedPath = selected;
       }
 
+      const existing = tabsRef.current.find(tab => tab.path === selectedPath);
+      if (existing) {
+        activateTab(existing.id);
+        return;
+      }
       const content = await readTextFile(selectedPath);
-      openFilePathRef.current = selectedPath;
-      editorContentRef.current = content;
-      setOpenFilePath(selectedPath);
-      setEditorContent(content);
-      setLastSavedContent(content);
+      const openedWhileReading = tabsRef.current.find(tab => tab.path === selectedPath);
+      if (openedWhileReading) { activateTab(openedWhileReading.id); return; }
+      const newTab: EditorTab = { id: crypto.randomUUID(), path: selectedPath, content, savedContent: content };
+      updateTabs(current => [...current, newTab]);
+      activateTab(newTab.id);
+      setFileError(null);
     } catch (error) {
       console.error("Failed to open file:", error);
+      setFileError(`Could not open file: ${String(error)}`);
     }
   };
 
   const handleEditorChange = (nextValue: string) => {
-    editorContentRef.current = nextValue;
-    setEditorContent(nextValue);
+    const id = activeTabIdRef.current;
+    updateTabs(current => current.map(tab => tab.id === id ? { ...tab, content: nextValue } : tab));
   };
 
-  const handleSaveFile = async () => {
+  const handleSaveFile = async (id = activeTabIdRef.current): Promise<boolean> => {
     try {
-      let targetPath = openFilePathRef.current;
+      const tab = tabsRef.current.find(item => item.id === id);
+      if (!tab) return false;
+      let targetPath = tab.path;
 
       if (!targetPath) {
         const selected = await save({
           title: "Save File",
         });
 
-        if (typeof selected !== "string") {
-          return;
-        }
+        if (typeof selected !== "string") return false;
 
         targetPath = selected;
       }
 
-      const contentToSave = editorContentRef.current;
+      const alreadyOpen = tabsRef.current.find(item => item.id !== id && item.path === targetPath);
+      if (alreadyOpen) {
+        setFileError('That file is already open in another tab.');
+        return false;
+      }
+      const contentToSave = tab.content;
       await writeTextFile(targetPath, contentToSave);
-      openFilePathRef.current = targetPath;
-      setOpenFilePath(targetPath);
-      setLastSavedContent(contentToSave);
+      updateTabs(current => current.map(item => item.id === id ? { ...item, path: targetPath, savedContent: contentToSave } : item));
+      setFileError(null);
+      return true;
     } catch (error) {
       console.error("Failed to save file:", error);
+      setFileError(`Could not save file: ${String(error)}`);
+      return false;
     }
+  };
+
+  const closeTab = (id: string) => {
+    const current = tabsRef.current;
+    const index = current.findIndex(tab => tab.id === id);
+    if (index < 0) return;
+    const next = current.filter(tab => tab.id !== id);
+    if (next.length === 0) next.push(newUntitledTab());
+    updateTabs(() => next);
+    if (activeTabIdRef.current === id) activateTab(next[Math.min(index, next.length - 1)].id);
+    setPendingCloseId(null);
+  };
+
+  const addUntitledTab = () => {
+    const tab = newUntitledTab();
+    updateTabs(current => [...current, tab]);
+    activateTab(tab.id);
+    editorRef.current?.focus();
+  };
+
+  const requestCloseTab = (id: string) => {
+    const tab = tabsRef.current.find(item => item.id === id);
+    if (!tab) return;
+    if (tab.content !== tab.savedContent) setPendingCloseId(id);
+    else closeTab(id);
+  };
+
+  const handleExplorerRename = (oldPath: string, newPath: string, isDirectory: boolean) => {
+    const matches = (path: string | null) => path === oldPath || (isDirectory && path != null && (path.startsWith(`${oldPath}/`) || path.startsWith(`${oldPath}\\`)));
+    updateTabs(current => current.map(tab => matches(tab.path) ? { ...tab, path: `${newPath}${tab.path!.slice(oldPath.length)}` } : tab));
+  };
+
+  const handleExplorerDelete = (path: string, isDirectory: boolean) => {
+    const matches = (filePath: string | null) => filePath === path || (isDirectory && filePath != null && (filePath.startsWith(`${path}/`) || filePath.startsWith(`${path}\\`)));
+    // Keep changed documents as unsaved tabs so deleting a file cannot erase edits.
+    updateTabs(current => current.map(tab => matches(tab.path) ? { ...tab, path: null, savedContent: tab.content === tab.savedContent ? tab.content : null } : tab));
   };
 
   useEffect(() => {
@@ -134,7 +204,27 @@ export default function App() {
         setIsPaletteOpen(open => !open);
         return;
       }
-      if (isPaletteOpen) return;
+      if (isPaletteOpen || pendingCloseId) return;
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'w') {
+        e.preventDefault();
+        e.stopPropagation();
+        requestCloseTab(activeTabIdRef.current);
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key === 'Tab') {
+        e.preventDefault();
+        e.stopPropagation();
+        const current = tabsRef.current;
+        const index = current.findIndex(tab => tab.id === activeTabIdRef.current);
+        activateTab(current[(index + (e.shiftKey ? current.length - 1 : 1)) % current.length].id);
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        e.stopPropagation();
+        addUntitledTab();
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "j") {
         e.preventDefault();
         e.stopPropagation();
@@ -177,9 +267,8 @@ export default function App() {
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [isPaletteOpen, isPanelOpen]);
+  }, [isPaletteOpen, isPanelOpen, pendingCloseId]);
 
-  const activeFileName = getFileNameFromPath(openFilePath);
   const commands: PaletteCommand[] = [
     { id: 'theme', label: 'Preferences: Color Theme', detail: `Current: ${theme.name}`, run: () => {} },
     { id: 'terminal', label: isPanelOpen ? 'View: Hide Terminal' : 'View: Show Terminal', shortcut: 'Ctrl/Cmd J', run: () => setIsPanelOpen(value => !value) },
@@ -188,6 +277,7 @@ export default function App() {
     { id: 'font-down', label: 'Appearance: Decrease Font Size', detail: `Currently ${fontSize}px`, run: () => setFontSize(value => Math.max(10, value - 1)) },
     { id: 'font-reset', label: 'Appearance: Reset Font Size', detail: '13px', run: () => setFontSize(13) },
     { id: 'open', label: 'File: Open File', shortcut: 'Ctrl/Cmd O', run: () => void handleOpenFile() },
+    { id: 'new', label: 'File: New File', shortcut: 'Ctrl/Cmd N', run: addUntitledTab },
     { id: 'save', label: 'File: Save File', shortcut: 'Ctrl/Cmd S', run: () => void handleSaveFile() },
     { id: 'terminal-folder', label: 'File: Open Current Terminal Folder', run: () => void handleOpenTerminalFolder() },
   ];
@@ -258,6 +348,9 @@ export default function App() {
         }}>
           <FileExplorer
             onFileSelect={handleOpenFile}
+            activeFilePath={activeTab.path}
+            onRename={handleExplorerRename}
+            onDelete={handleExplorerDelete}
             terminalFolderRequest={terminalFolderRequest}
             onOpenTerminalFolder={handleOpenTerminalFolder}
             terminalFolderError={terminalFolderError}
@@ -266,27 +359,17 @@ export default function App() {
 
         {/* Main Editor */}
         <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-          <div
-            style={{
-              height: "34px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "0 12px",
-              borderBottom: "1px solid var(--border)",
-              backgroundColor: "var(--panel-header)",
-              color: "var(--muted)",
-              fontSize: "12px",
-              fontFamily: "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
-            }}
-          >
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {activeFileName}
-            </span>
-            {hasUnsavedChanges && <span style={{ color: "var(--warning)" }}>Unsaved</span>}
+          <div className="editor-tabs" role="tablist" aria-label="Open files">
+            {tabs.map(tab => (
+              <div key={tab.id} className={`editor-tab ${tab.id === activeTabId ? 'active' : ''}`} role="tab" aria-selected={tab.id === activeTabId} title={tab.path ?? 'Untitled'}>
+                <button className="editor-tab-label" onClick={() => activateTab(tab.id)}>{getFileNameFromPath(tab.path)}{tab.content !== tab.savedContent && <span className="editor-tab-dirty" title="Unsaved changes">●</span>}</button>
+                <button className="editor-tab-close" aria-label={`Close ${getFileNameFromPath(tab.path)}`} onClick={() => requestCloseTab(tab.id)}>×</button>
+              </div>
+            ))}
           </div>
+          {fileError && <div className="file-error" role="alert">{fileError}<button onClick={() => setFileError(null)} aria-label="Dismiss error">×</button></div>}
           <div style={{ flex: 1, overflow: "hidden" }}>
-            <Editor ref={editorRef} doc={editorContent} theme={theme} fontSize={fontSize} onChange={handleEditorChange} />
+            <Editor ref={editorRef} tabId={activeTab.id} openTabIds={tabs.map(tab => tab.id)} doc={activeTab.content} theme={theme} fontSize={fontSize} onChange={handleEditorChange} />
           </div>
         </div>
       </div>
@@ -311,6 +394,20 @@ export default function App() {
           onThemeChange={setThemeId}
           onClose={() => setIsPaletteOpen(false)}
         />
+      )}
+      {pendingCloseId && (
+        <div className="file-dialog-backdrop" role="presentation">
+          <div className="file-dialog" role="dialog" aria-modal="true" aria-label="Unsaved changes">
+            <strong>Save changes?</strong>
+            <p>{getFileNameFromPath(tabs.find(tab => tab.id === pendingCloseId)?.path ?? null)} has unsaved changes.</p>
+            {fileError && <p role="alert" style={{ color: 'var(--warning)' }}>{fileError}</p>}
+            <div className="file-dialog-actions">
+              <button onClick={() => setPendingCloseId(null)}>Cancel</button>
+              <button onClick={() => closeTab(pendingCloseId)}>Don't Save</button>
+              <button className="primary" onClick={async () => { if (await handleSaveFile(pendingCloseId)) closeTab(pendingCloseId); }}>Save</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

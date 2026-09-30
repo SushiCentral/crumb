@@ -53,6 +53,9 @@ npm run tauri:dev
 
 - `Ctrl/Cmd + O` — Open a file
 - `Ctrl/Cmd + S` — Save file
+- `Ctrl/Cmd + N` — New untitled tab
+- `Ctrl/Cmd + W` — Close the current tab (prompts for unsaved changes)
+- `Ctrl/Cmd + Tab` — Switch tabs (`Shift` goes backward)
 - `Ctrl/Cmd + B` — Toggle file explorer sidebar
 - `Ctrl/Cmd + J` — Toggle bottom panel (terminal / output / problems)
 - `Ctrl + \`` — Open and focus the terminal; press again to return to the editor
@@ -63,6 +66,8 @@ npm run tauri:dev
 Open the command palette with `Ctrl/Cmd + Shift + P`, then choose **Preferences: Color Theme**. Crumb includes Crumb, One Dark, Dracula, Catppuccin Mocha, and Catppuccin Latte. The chosen theme and font size are saved locally and restored on restart.
 
 The palette also lets you toggle the terminal and file tree, change or reset the editor and terminal font size, open or save a file, and open the selected terminal's current folder.
+
+Files open in separate tabs. Each tab keeps its own edits and undo history. The explorer lets you create files and folders from its toolbar, or use a file or folder's context menu to create, rename, or delete items. The tree refreshes when files change outside Crumb.
 
 The One Dark colors are adapted from [One Dark Pro](https://github.com/Binaryify/OneDark-Pro) (MIT); Dracula colors from [Dracula](https://github.com/dracula/dracula-theme) (MIT); and Catppuccin colors from [Catppuccin](https://github.com/catppuccin/palette) (MIT). Crumb's interface colors are arranged independently for its layout.
 
