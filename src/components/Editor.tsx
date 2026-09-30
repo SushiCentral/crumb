@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { EditorView, basicSetup } from 'codemirror';
-import { Annotation, Compartment, EditorState, Prec } from '@codemirror/state';
+import { Annotation, Compartment, EditorState, Prec, Transaction } from '@codemirror/state';
 import { javascript } from '@codemirror/lang-javascript';
 import { createSyntaxHighlighting } from '../lib/highlight';
 import { languageForPath } from '../lib/languages';
@@ -13,7 +13,10 @@ interface EditorProps {
   doc: string;
   theme: Theme;
   fontSize: number;
+  fontFamily: string;
+  wordWrap: boolean;
   onChange?: (value: string) => void;
+  onFocus?: () => void;
 }
 
 export interface EditorHandle {
@@ -24,13 +27,14 @@ const externalDocUpdate = Annotation.define<boolean>();
 const syntaxCompartment = new Compartment();
 const languageCompartment = new Compartment();
 const appearanceCompartment = new Compartment();
+const wrappingCompartment = new Compartment();
 
-function editorAppearance(theme: Theme, fontSize: number) {
+function editorAppearance(theme: Theme, fontSize: number, fontFamily: string) {
   return EditorView.theme({
     '&': {
       backgroundColor: 'var(--editor)',
       color: 'var(--text)',
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+      fontFamily: `'${fontFamily}', monospace`,
       fontSize: `${fontSize}px`,
       lineHeight: '1.6',
     },
@@ -52,7 +56,7 @@ function editorAppearance(theme: Theme, fontSize: number) {
   }, { dark: theme.dark });
 }
 
-const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, path, openTabIds, doc, theme, fontSize, onChange }, ref) {
+const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, onChange, onFocus }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const statesRef = useRef(new Map<string, EditorState>());
@@ -69,7 +73,8 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, pa
       syntaxCompartment.of(Prec.highest(createSyntaxHighlighting(currentTheme))),
       basicSetup,
       languageCompartment.of([]),
-      appearanceCompartment.of(editorAppearance(currentTheme, currentFontSize)),
+      appearanceCompartment.of(editorAppearance(currentTheme, currentFontSize, fontFamily)),
+      wrappingCompartment.of(wordWrap ? EditorView.lineWrapping : []),
       EditorView.updateListener.of(update => {
         if (!update.docChanged) return;
         statesRef.current.set(activeTabRef.current, update.state);
@@ -99,10 +104,11 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, pa
     view.dispatch({
       effects: [
         syntaxCompartment.reconfigure(Prec.highest(createSyntaxHighlighting(theme))),
-        appearanceCompartment.reconfigure(editorAppearance(theme, fontSize)),
+        appearanceCompartment.reconfigure(editorAppearance(theme, fontSize, fontFamily)),
+        wrappingCompartment.reconfigure(wordWrap ? EditorView.lineWrapping : []),
       ],
     });
-  }, [tabId, theme, fontSize]);
+  }, [tabId, theme, fontSize, fontFamily, wordWrap]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -132,12 +138,12 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, pa
     const view = viewRef.current;
     if (!view || view.state.doc.toString() === doc) return;
     view.dispatch({
-      annotations: externalDocUpdate.of(true),
+      annotations: [externalDocUpdate.of(true), Transaction.addToHistory.of(false)],
       changes: { from: 0, to: view.state.doc.length, insert: doc },
     });
   }, [doc]);
 
-  return <div ref={containerRef} style={{ height: '100%', width: '100%' }} />;
+  return <div ref={containerRef} onFocusCapture={onFocus} style={{ height: '100%', width: '100%' }} />;
 });
 
 export default Editor;

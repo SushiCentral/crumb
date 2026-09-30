@@ -8,6 +8,8 @@ type Target = { path: string; name: string; isDirectory: boolean };
 const joinPath = (parent: string, name: string) => `${parent}${parent.endsWith('/') || parent.endsWith('\\') ? '' : parent.includes('\\') ? '\\' : '/'}${name}`;
 const parentPath = (path: string) => path.slice(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')));
 const sorted = (entries: DirEntry[]) => entries.sort((a, b) => Number(b.isDirectory) - Number(a.isDirectory) || a.name.localeCompare(b.name));
+// Keep useful configuration dotfiles visible, but avoid exposing Git's internal database.
+const visibleEntries = (entries: DirEntry[]) => sorted(entries.filter(entry => !(entry.isDirectory && entry.name === '.git')));
 
 type NodeProps = {
   entry: DirEntry; path: string; level: number; refresh: number; activeFilePath: string | null;
@@ -22,7 +24,7 @@ function TreeNode({ entry, path, level, refresh, activeFilePath, onFileSelect, o
   useEffect(() => {
     if (!entry.isDirectory || !expanded) return;
     let cancelled = false;
-    readDir(path).then(items => { if (!cancelled) { setChildren(sorted(items)); setError(null); } })
+    readDir(path).then(items => { if (!cancelled) { setChildren(visibleEntries(items)); setError(null); } })
       .catch(reason => { if (!cancelled) setError(String(reason)); });
     return () => { cancelled = true; };
   }, [entry.isDirectory, expanded, path, refresh]);
@@ -45,6 +47,7 @@ function TreeNode({ entry, path, level, refresh, activeFilePath, onFileSelect, o
 
 interface Props {
   onFileSelect: (path: string) => void;
+  onFileOpenInSplit: (path: string) => void;
   activeFilePath: string | null;
   onRename: (oldPath: string, newPath: string, isDirectory: boolean) => void;
   onDelete: (path: string, isDirectory: boolean) => void;
@@ -55,7 +58,7 @@ interface Props {
   terminalFolderError: string | null;
 }
 
-export default function FileExplorer({ onFileSelect, activeFilePath, onRename, onDelete, onRootPathChange, onFolderOpened, terminalFolderRequest, onOpenTerminalFolder, terminalFolderError }: Props) {
+export default function FileExplorer({ onFileSelect, onFileOpenInSplit, activeFilePath, onRename, onDelete, onRootPathChange, onFolderOpened, terminalFolderRequest, onOpenTerminalFolder, terminalFolderError }: Props) {
   const [rootPath, setRootPath] = useState<string | null>(null);
   const [rootFiles, setRootFiles] = useState<DirEntry[]>([]);
   const [refresh, setRefresh] = useState(0);
@@ -73,7 +76,7 @@ export default function FileExplorer({ onFileSelect, activeFilePath, onRename, o
   useEffect(() => {
     if (!rootPath) return;
     let cancelled = false;
-    readDir(rootPath).then(items => { if (!cancelled) { setRootFiles(sorted(items)); setError(null); } })
+    readDir(rootPath).then(items => { if (!cancelled) { setRootFiles(visibleEntries(items)); setError(null); } })
       .catch(reason => { if (!cancelled) setError(`Could not open folder: ${String(reason)}`); });
     return () => { cancelled = true; };
   }, [rootPath, refresh]);
@@ -93,7 +96,7 @@ export default function FileExplorer({ onFileSelect, activeFilePath, onRename, o
       const selected = await open({ directory: true, multiple: false });
       if (typeof selected === 'string') {
         const items = await readDir(selected);
-        setRootFiles(sorted(items));
+        setRootFiles(visibleEntries(items));
         setRootPath(selected);
         setRefresh(value => value + 1);
         setError(null);
@@ -154,6 +157,7 @@ export default function FileExplorer({ onFileSelect, activeFilePath, onRename, o
     </> : <div className="explorer-empty"><button className="explorer-open" onClick={chooseFolder}>Open Folder</button></div>}</div>
     {menu && <div className="tree-menu-backdrop" onClick={() => setMenu(null)} onContextMenu={event => { event.preventDefault(); setMenu(null); }}>
       <div className="tree-menu" style={{ left: menu.x, top: menu.y }} onClick={event => event.stopPropagation()}>
+        {!menu.target.isDirectory && <button onClick={() => { onFileOpenInSplit(menu.target.path); setMenu(null); }}>Open in Split View</button>}
         {menu.target.isDirectory && <><button onClick={() => start('new-file', menu.target)}>New File</button><button onClick={() => start('new-folder', menu.target)}>New Folder</button></>}
         <button onClick={() => start('rename', menu.target)}>Rename</button><button onClick={() => start('delete', menu.target)}>Delete</button>
       </div>

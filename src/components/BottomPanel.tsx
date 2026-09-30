@@ -55,6 +55,7 @@ interface BottomPanelProps {
   onActiveSessionChange: (sessionId: string | null) => void;
   theme: Theme;
   fontSize: number;
+  fontFamily: string;
   focusRequest: number;
   workingDirectory: string | null;
   openTerminalRequest: { path: string; sequence: number } | null;
@@ -72,7 +73,7 @@ interface TerminalGroup {
   activeTerminalId: string;
 }
 
-export default function BottomPanel({ onClose, onActiveSessionChange, theme, fontSize, focusRequest, workingDirectory, openTerminalRequest }: BottomPanelProps) {
+export default function BottomPanel({ onClose, onActiveSessionChange, theme, fontSize, fontFamily, focusRequest, workingDirectory, openTerminalRequest }: BottomPanelProps) {
   const [activeTab, setActiveTab] = useState<'terminal' | 'output' | 'problems'>('terminal');
   
   // Terminal Multiplexing State - Initialized lazily to avoid Date clock drifts in strict mode
@@ -294,6 +295,7 @@ export default function BottomPanel({ onClose, onActiveSessionChange, theme, fon
                       id={term.id}
                       theme={theme}
                       fontSize={fontSize}
+                      fontFamily={fontFamily}
                       focusRequest={activeTab === 'terminal' ? focusRequest : 0}
                       shell={term.shell}
                       cwd={term.cwd}

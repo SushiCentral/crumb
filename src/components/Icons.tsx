@@ -26,3 +26,10 @@ export function NewFolderIcon(props: IconProps) {
     <path d="M2.75 6.5a2 2 0 0 1 2-2h5l2.2 2.25h7.3a2 2 0 0 1 2 2v5M2.75 8.75v10.5a2 2 0 0 0 2 2H12M17 16v6M14 19h6" />
   </svg>;
 }
+
+export function SplitPreviewIcon(props: IconProps) {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
+    <rect x="2.75" y="4" width="18.5" height="16" rx="2" />
+    <path d="M12 4v16M5.5 8h4M5.5 11h3M14.5 8h4M14.5 11h4M14.5 14h3" />
+  </svg>;
+}

@@ -35,10 +35,11 @@ interface TerminalProps {
   onSessionChange?: (id: string, sessionId: string | null) => void;
   theme: Theme;
   fontSize: number;
+  fontFamily: string;
   focusRequest: number;
 }
 
-export default function Terminal({ id, isActive, shell, cwd, onClick, onTitleChange, onSessionChange, theme, fontSize, focusRequest }: TerminalProps) {
+export default function Terminal({ id, isActive, shell, cwd, onClick, onTitleChange, onSessionChange, theme, fontSize, fontFamily, focusRequest }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -51,7 +52,7 @@ export default function Terminal({ id, isActive, shell, cwd, onClick, onTitleCha
 
     // Initialize xterm.js
     const term = new XTerm({
-      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+      fontFamily: `'${fontFamily}', monospace`,
       fontSize,
       theme: terminalTheme(theme),
       cursorBlink: true,
@@ -130,8 +131,9 @@ export default function Terminal({ id, isActive, shell, cwd, onClick, onTitleCha
     if (!term) return;
     term.options.theme = terminalTheme(theme);
     term.options.fontSize = fontSize;
+    term.options.fontFamily = `'${fontFamily}', monospace`;
     if (term.element?.clientWidth) fitAddonRef.current?.fit();
-  }, [theme, fontSize]);
+  }, [theme, fontSize, fontFamily]);
 
   useEffect(() => {
     if (focusRequest > 0 && isActive) xtermRef.current?.focus();

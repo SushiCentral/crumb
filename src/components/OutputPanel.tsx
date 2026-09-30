@@ -1,7 +1,7 @@
 export default function OutputPanel() {
   return (
-    <div style={{ padding: '16px', color: 'var(--text)', fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: '13px', overflowY: 'auto', height: '100%' }}>
-      <p style={{ margin: 0, opacity: 0.5 }}>[Output] Waiting for build or runtime events...</p>
+    <div className="placeholder-panel" style={{ fontFamily: 'var(--code-font)' }}>
+      <p><strong>[Output]</strong> Waiting for build or runtime events...</p>
     </div>
   );
 }
