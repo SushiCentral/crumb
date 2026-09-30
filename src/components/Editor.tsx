@@ -3,10 +3,12 @@ import { EditorView, basicSetup } from 'codemirror';
 import { Annotation, Compartment, EditorState, Prec } from '@codemirror/state';
 import { javascript } from '@codemirror/lang-javascript';
 import { createSyntaxHighlighting } from '../lib/highlight';
+import { languageForPath } from '../lib/languages';
 import type { Theme } from '../lib/themes';
 
 interface EditorProps {
   tabId: string;
+  path: string | null;
   openTabIds: string[];
   doc: string;
   theme: Theme;
@@ -20,6 +22,7 @@ export interface EditorHandle {
 
 const externalDocUpdate = Annotation.define<boolean>();
 const syntaxCompartment = new Compartment();
+const languageCompartment = new Compartment();
 const appearanceCompartment = new Compartment();
 
 function editorAppearance(theme: Theme, fontSize: number) {
@@ -49,7 +52,7 @@ function editorAppearance(theme: Theme, fontSize: number) {
   }, { dark: theme.dark });
 }
 
-const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, openTabIds, doc, theme, fontSize, onChange }, ref) {
+const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, path, openTabIds, doc, theme, fontSize, onChange }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const statesRef = useRef(new Map<string, EditorState>());
@@ -65,7 +68,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, op
     extensions: [
       syntaxCompartment.of(Prec.highest(createSyntaxHighlighting(currentTheme))),
       basicSetup,
-      javascript(),
+      languageCompartment.of([]),
       appearanceCompartment.of(editorAppearance(currentTheme, currentFontSize)),
       EditorView.updateListener.of(update => {
         if (!update.docChanged) return;
@@ -100,6 +103,25 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, op
       ],
     });
   }, [tabId, theme, fontSize]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    let cancelled = false;
+    const description = languageForPath(path);
+    if (!path) {
+      view.dispatch({ effects: languageCompartment.reconfigure(javascript()) });
+    } else if (!description) {
+      view.dispatch({ effects: languageCompartment.reconfigure([]) });
+    } else {
+      void description.load().then(support => {
+        if (!cancelled && activeTabRef.current === tabId) {
+          view.dispatch({ effects: languageCompartment.reconfigure(support) });
+        }
+      }).catch(error => console.error(`Could not load ${description.name} highlighting:`, error));
+    }
+    return () => { cancelled = true; };
+  }, [tabId, path]);
 
   useEffect(() => {
     const open = new Set(openTabIds);

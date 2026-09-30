@@ -6,7 +6,9 @@ import Editor, { type EditorHandle } from "./components/Editor";
 import BottomPanel from "./components/BottomPanel";
 import FileExplorer from "./components/FileExplorer";
 import CommandPalette, { type PaletteCommand } from "./components/CommandPalette";
+import QuickOpen, { type QuickOpenHandle } from "./components/QuickOpen";
 import { getTheme, themes, themeVariables } from "./lib/themes";
+import { languageName } from "./lib/languages";
 import { FolderIcon } from "./components/Icons";
 import "./App.css";
 
@@ -53,10 +55,12 @@ export default function App() {
   const [activeTerminalSessionId, setActiveTerminalSessionId] = useState<string | null>(null);
   const [terminalFocusRequest, setTerminalFocusRequest] = useState(0);
   const [terminalFolderRequest, setTerminalFolderRequest] = useState<{ path: string; sequence: number } | null>(null);
+  const [openTerminalRequest, setOpenTerminalRequest] = useState<{ path: string; sequence: number } | null>(null);
   const [terminalFolderError, setTerminalFolderError] = useState<string | null>(null);
   const tabsRef = useRef(tabs);
   const activeTabIdRef = useRef(activeTabId);
   const editorRef = useRef<EditorHandle>(null);
+  const quickOpenRef = useRef<QuickOpenHandle>(null);
   const sidebarDraggingRef = useRef(false);
   const panelDraggingRef = useRef(false);
 
@@ -92,6 +96,13 @@ export default function App() {
     } catch (error) {
       setTerminalFolderError(String(error));
     }
+  };
+
+  const handleFolderOpened = (path: string) => {
+    setExplorerRootPath(path);
+    setOpenTerminalRequest(previous => ({ path, sequence: (previous?.sequence ?? 0) + 1 }));
+    setIsPanelOpen(true);
+    setTerminalFocusRequest(value => value + 1);
   };
 
   const handleOpenFile = async (path?: string) => {
@@ -210,6 +221,12 @@ export default function App() {
         return;
       }
       if (isPaletteOpen || pendingCloseId) return;
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        e.stopPropagation();
+        quickOpenRef.current?.focus();
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'w') {
         e.preventDefault();
         e.stopPropagation();
@@ -282,6 +299,7 @@ export default function App() {
     { id: 'font-down', label: 'Appearance: Decrease Font Size', detail: `Currently ${fontSize}px`, run: () => setFontSize(value => Math.max(10, value - 1)) },
     { id: 'font-reset', label: 'Appearance: Reset Font Size', detail: '13px', run: () => setFontSize(13) },
     { id: 'open', label: 'File: Open File', shortcut: 'Ctrl/Cmd O', run: () => void handleOpenFile() },
+    { id: 'quick-open', label: 'File: Search Files', shortcut: 'Ctrl/Cmd P', run: () => quickOpenRef.current?.focus() },
     { id: 'new', label: 'File: New File', shortcut: 'Ctrl/Cmd N', run: addUntitledTab },
     { id: 'save', label: 'File: Save File', shortcut: 'Ctrl/Cmd S', run: () => void handleSaveFile() },
     { id: 'terminal-folder', label: 'File: Open Current Terminal Folder', run: () => void handleOpenTerminalFolder() },
@@ -289,6 +307,15 @@ export default function App() {
 
   return (
     <div style={{ ...themeVariables(theme), colorScheme: theme.dark ? 'dark' : 'light', height: "100vh", width: "100vw", display: "flex", flexDirection: "column", overflow: "hidden", backgroundColor: "var(--editor)", color: "var(--text)" }}>
+      <header className="top-bar">
+        <div className="top-bar-brand"><FolderIcon width={17} height={17} /><strong>crumb</strong></div>
+        <QuickOpen ref={quickOpenRef} rootPath={explorerRootPath} openPaths={tabs.flatMap(tab => tab.path ? [tab.path] : [])} onOpenFile={path => { void handleOpenFile(path); }} />
+        <div className="top-bar-actions">
+          <span className="top-bar-workspace" title={explorerRootPath ?? 'No folder open'}>{explorerRootPath ? getFileNameFromPath(explorerRootPath) : 'No folder'}</span>
+          <span className="top-bar-language" title="Current file language">{languageName(activeTab.path)}</span>
+          <button title="Commands and themes (Ctrl/Cmd+Shift+P)" onClick={() => setIsPaletteOpen(true)}>Commands</button>
+        </div>
+      </header>
       <div style={{ flex: 1, minHeight: 0, display: "flex", overflow: "hidden" }}>
         {/* Activity Bar */}
         <div style={{
@@ -357,6 +384,7 @@ export default function App() {
             onRename={handleExplorerRename}
             onDelete={handleExplorerDelete}
             onRootPathChange={setExplorerRootPath}
+            onFolderOpened={handleFolderOpened}
             terminalFolderRequest={terminalFolderRequest}
             onOpenTerminalFolder={handleOpenTerminalFolder}
             terminalFolderError={terminalFolderError}
@@ -388,33 +416,33 @@ export default function App() {
           </div>
           {fileError && <div className="file-error" role="alert">{fileError}<button onClick={() => setFileError(null)} aria-label="Dismiss error">×</button></div>}
           <div style={{ flex: 1, overflow: "hidden" }}>
-            <Editor ref={editorRef} tabId={activeTab.id} openTabIds={tabs.map(tab => tab.id)} doc={activeTab.content} theme={theme} fontSize={fontSize} onChange={handleEditorChange} />
+            <Editor ref={editorRef} tabId={activeTab.id} path={activeTab.path} openTabIds={tabs.map(tab => tab.id)} doc={activeTab.content} theme={theme} fontSize={fontSize} onChange={handleEditorChange} />
           </div>
         </div>
       </div>
 
-      {isPanelOpen && <div className="resize-handle horizontal" role="separator" aria-label="Resize bottom panel" aria-orientation="horizontal" aria-valuemin={120} aria-valuemax={Math.max(120, window.innerHeight - 160)} aria-valuenow={panelHeight} tabIndex={0}
+      {isPanelOpen && <div className="resize-handle horizontal" role="separator" aria-label="Resize bottom panel" aria-orientation="horizontal" aria-valuemin={120} aria-valuemax={Math.max(120, window.innerHeight - 200)} aria-valuenow={panelHeight} tabIndex={0}
         onPointerDown={event => { event.preventDefault(); panelDraggingRef.current = true; event.currentTarget.setPointerCapture(event.pointerId); }}
         onPointerMove={event => {
           if (!panelDraggingRef.current) return;
           const bottom = event.currentTarget.parentElement?.getBoundingClientRect().bottom ?? window.innerHeight;
           const available = event.currentTarget.parentElement?.clientHeight ?? window.innerHeight;
-          setPanelHeight(Math.max(120, Math.min(available - 160, bottom - event.clientY)));
+          setPanelHeight(Math.max(120, Math.min(available - 200, bottom - event.clientY)));
         }}
         onPointerUp={event => { panelDraggingRef.current = false; event.currentTarget.releasePointerCapture(event.pointerId); }}
         onLostPointerCapture={() => { panelDraggingRef.current = false; }}
-        onKeyDown={event => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setPanelHeight(height => Math.max(120, Math.min(window.innerHeight - 160, height + (event.key === 'ArrowUp' ? 10 : -10)))); } }}
+        onKeyDown={event => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setPanelHeight(height => Math.max(120, Math.min(window.innerHeight - 200, height + (event.key === 'ArrowUp' ? 10 : -10)))); } }}
       />}
       {/* Bottom Panel */}
       <div
         style={{
           height: isPanelOpen ? `${panelHeight}px` : "0",
-          maxHeight: 'calc(100vh - 160px)',
+          maxHeight: 'calc(100vh - 200px)',
           backgroundColor: "var(--panel)",
           display: isPanelOpen ? "block" : "none"
         }}
       >
-        <BottomPanel onClose={() => setIsPanelOpen(false)} onActiveSessionChange={setActiveTerminalSessionId} theme={theme} fontSize={fontSize} focusRequest={terminalFocusRequest} workingDirectory={explorerRootPath} />
+        <BottomPanel onClose={() => setIsPanelOpen(false)} onActiveSessionChange={setActiveTerminalSessionId} theme={theme} fontSize={fontSize} focusRequest={terminalFocusRequest} workingDirectory={explorerRootPath} openTerminalRequest={openTerminalRequest} />
       </div>
       {isPaletteOpen && (
         <CommandPalette

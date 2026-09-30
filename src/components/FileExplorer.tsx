@@ -49,12 +49,13 @@ interface Props {
   onRename: (oldPath: string, newPath: string, isDirectory: boolean) => void;
   onDelete: (path: string, isDirectory: boolean) => void;
   onRootPathChange: (path: string | null) => void;
+  onFolderOpened: (path: string) => void;
   terminalFolderRequest: { path: string; sequence: number } | null;
   onOpenTerminalFolder: () => void;
   terminalFolderError: string | null;
 }
 
-export default function FileExplorer({ onFileSelect, activeFilePath, onRename, onDelete, onRootPathChange, terminalFolderRequest, onOpenTerminalFolder, terminalFolderError }: Props) {
+export default function FileExplorer({ onFileSelect, activeFilePath, onRename, onDelete, onRootPathChange, onFolderOpened, terminalFolderRequest, onOpenTerminalFolder, terminalFolderError }: Props) {
   const [rootPath, setRootPath] = useState<string | null>(null);
   const [rootFiles, setRootFiles] = useState<DirEntry[]>([]);
   const [refresh, setRefresh] = useState(0);
@@ -90,7 +91,14 @@ export default function FileExplorer({ onFileSelect, activeFilePath, onRename, o
   const chooseFolder = async () => {
     try {
       const selected = await open({ directory: true, multiple: false });
-      if (typeof selected === 'string') { setRootPath(selected); setRefresh(value => value + 1); }
+      if (typeof selected === 'string') {
+        const items = await readDir(selected);
+        setRootFiles(sorted(items));
+        setRootPath(selected);
+        setRefresh(value => value + 1);
+        setError(null);
+        onFolderOpened(selected);
+      }
     } catch (reason) { setError(`Could not open folder: ${String(reason)}`); }
   };
   const start = (action: Action, target: Target) => {

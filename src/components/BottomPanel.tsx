@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import Terminal from './Terminal';
 import OutputPanel from './OutputPanel';
@@ -57,6 +57,7 @@ interface BottomPanelProps {
   fontSize: number;
   focusRequest: number;
   workingDirectory: string | null;
+  openTerminalRequest: { path: string; sequence: number } | null;
 }
 
 interface TerminalInstance {
@@ -71,7 +72,7 @@ interface TerminalGroup {
   activeTerminalId: string;
 }
 
-export default function BottomPanel({ onClose, onActiveSessionChange, theme, fontSize, focusRequest, workingDirectory }: BottomPanelProps) {
+export default function BottomPanel({ onClose, onActiveSessionChange, theme, fontSize, focusRequest, workingDirectory, openTerminalRequest }: BottomPanelProps) {
   const [activeTab, setActiveTab] = useState<'terminal' | 'output' | 'problems'>('terminal');
   
   // Terminal Multiplexing State - Initialized lazily to avoid Date clock drifts in strict mode
@@ -85,6 +86,7 @@ export default function BottomPanel({ onClose, onActiveSessionChange, theme, fon
   const [availableShells, setAvailableShells] = useState<string[]>([]);
   const [isShellDropdownOpen, setIsShellDropdownOpen] = useState(false);
   const [sessionIds, setSessionIds] = useState<Record<string, string>>({});
+  const lastOpenRequestRef = useRef<number | null>(null);
 
   useEffect(() => {
     const group = groups.find(g => g.id === activeGroupId);
@@ -100,16 +102,23 @@ export default function BottomPanel({ onClose, onActiveSessionChange, theme, fon
     if (focusRequest > 0) setActiveTab('terminal');
   }, [focusRequest]);
 
-  const handleNewTerminal = (shell?: string) => {
+  const handleNewTerminal = (shell?: string, cwd = workingDirectory) => {
     const newTermId = crypto.randomUUID();
     const newGroupId = crypto.randomUUID();
     setGroups(prev => [...prev, {
       id: newGroupId,
-      terminals: [{ id: newTermId, shell, cwd: workingDirectory }],
+      terminals: [{ id: newTermId, shell, cwd }],
       activeTerminalId: newTermId
     }]);
     setActiveGroupId(newGroupId);
   };
+
+  useEffect(() => {
+    if (!openTerminalRequest || lastOpenRequestRef.current === openTerminalRequest.sequence) return;
+    lastOpenRequestRef.current = openTerminalRequest.sequence;
+    handleNewTerminal(undefined, openTerminalRequest.path);
+    setActiveTab('terminal');
+  }, [openTerminalRequest]);
 
   const handleSplitTerminal = (shell?: string) => {
     const newTermId = crypto.randomUUID();

@@ -6,7 +6,7 @@ Crumb is a cross-platform code editor inspired by VS Code. It features a code ed
 
 ## Features
 
-- **Code editor** powered by CodeMirror 6 with syntax highlighting
+- **Code editor** powered by CodeMirror 6 with syntax highlighting selected from the file name
 - **File explorer** sidebar with recursive folder browsing
 - **Integrated terminal** panel with support for multiple terminals and split views; new terminals start in the Explorer folder
 - **Resizable panels** — drag the sidebar and bottom panel edges, or toggle them independently
@@ -52,6 +52,7 @@ npm run tauri:dev
 ## Keyboard Shortcuts
 
 - `Ctrl/Cmd + O` — Open a file
+- `Ctrl/Cmd + P` — Search filenames in the open folder and open tabs
 - `Ctrl/Cmd + S` — Save file
 - `Ctrl/Cmd + N` — New untitled tab
 - `Ctrl/Cmd + W` — Close the current tab (prompts for unsaved changes)
@@ -69,6 +70,8 @@ The palette also lets you toggle the terminal and file tree, change or reset the
 
 Files open in separate tabs. Each tab keeps its own edits and undo history. The explorer lets you create files and folders from its toolbar, or use a file or folder's context menu to create, rename, or delete items. The tree refreshes when files change outside Crumb.
 
+Opening a folder with **Open Folder** also opens and focuses a new terminal in that folder. **Terminal folder** only changes the Explorer folder. The top search bar finds files by name in the open folder; unsupported file types open as plain text.
+
 The One Dark colors are adapted from [One Dark Pro](https://github.com/Binaryify/OneDark-Pro) (MIT); Dracula colors from [Dracula](https://github.com/dracula/dracula-theme) (MIT); and Catppuccin colors from [Catppuccin](https://github.com/catppuccin/palette) (MIT). Crumb's interface colors are arranged independently for its layout.
 
 ## Project Structure
@@ -79,12 +82,14 @@ crumb/
 │   ├── components/           # UI components
 │   │   ├── Editor.tsx        # CodeMirror editor
 │   │   ├── FileExplorer.tsx  # Sidebar file tree
+│   │   ├── QuickOpen.tsx     # Top bar file search
 │   │   ├── BottomPanel.tsx   # Tabbed panel container
 │   │   ├── Terminal.tsx      # xterm.js terminal
 │   │   ├── OutputPanel.tsx   # Build/runtime output
 │   │   └── ProblemsPanel.tsx # Problem markers
 │   ├── lib/
-│   │   └── highlight.ts      # Syntax highlighting theme
+│   │   ├── highlight.ts      # Syntax highlighting theme
+│   │   └── languages.ts      # File language detection
 │   ├── App.tsx               # Root layout
 │   └── main.tsx             # React entry point
 ├── src-tauri/               # Rust backend
