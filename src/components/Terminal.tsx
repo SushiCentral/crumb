@@ -65,6 +65,9 @@ export default function Terminal({ id, isActive, shell, cwd, onClick, onTitleCha
 
     term.open(terminalRef.current);
     let unlistenPromise: Promise<() => void> | null = null;
+    let spawnPromise: Promise<void> | null = null;
+    let disposed = false;
+    let clearPromptTimeout: ReturnType<typeof setTimeout> | null = null;
     let resizeListener: { dispose: () => void } | null = null;
 
     // Delay spawning by 50ms so CSS Engine perfectly calculates width/height.
@@ -73,16 +76,21 @@ export default function Terminal({ id, isActive, shell, cwd, onClick, onTitleCha
     const spawnTimeout = setTimeout(() => {
       fitAddon.fit();
 
-      invoke('spawn_pty', { id: sessionId, rows: term.rows, cols: term.cols, shell, cwd }).then(() => {
-        // macOS Zsh specific hack to clear the three buggy initialization prompts reliably
-        setTimeout(() => invoke('write_pty', { id: sessionId, data: '\x0c' }).catch(console.error), 250);
-      }).catch((err) => {
+      spawnPromise = invoke<void>('spawn_pty', { id: sessionId, rows: term.rows, cols: term.cols, shell, cwd });
+      void spawnPromise.then(() => {
+        if (!disposed) {
+          clearPromptTimeout = setTimeout(() => {
+            if (!disposed) void invoke('write_pty', { id: sessionId, data: '\x0c' }).catch(console.error);
+          }, 250);
+        }
+      }).catch(() => { /* The error is shown by the handler below. */ });
+      void spawnPromise.catch((err) => {
         console.error(err);
-        term.write(`\r\n\x1b[1;31mError spawning PTY: ${err}\x1b[0m\r\n`);
+        if (!disposed) term.write(`\r\n\x1b[1;31mError spawning PTY: ${err}\x1b[0m\r\n`);
       });
 
       unlistenPromise = listen<PtyPayload>('pty-output', (event) => {
-        if (event.payload.id === sessionId) {
+        if (!disposed && event.payload.id === sessionId) {
           term.write(event.payload.data);
         }
       });
@@ -113,16 +121,20 @@ export default function Terminal({ id, isActive, shell, cwd, onClick, onTitleCha
     observer.observe(terminalRef.current);
 
     return () => {
+      disposed = true;
       onSessionChange?.(id, null);
       clearTimeout(spawnTimeout);
+      if (clearPromptTimeout) clearTimeout(clearPromptTimeout);
       observer.disconnect();
       if (resizeListener) resizeListener.dispose();
       titleListener.dispose();
       term.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
-      if (unlistenPromise) unlistenPromise.then(un => un());
-      invoke('kill_pty', { id: sessionId }).catch(console.error);
+      if (unlistenPromise) void unlistenPromise.then(un => un()).catch(console.error);
+      if (spawnPromise) {
+        void spawnPromise.then(() => invoke('kill_pty', { id: sessionId })).catch(console.error);
+      }
     };
   }, []);
 
