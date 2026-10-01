@@ -158,10 +158,7 @@ export default function BottomPanel({ onClose, onActiveSessionChange, theme, fon
       // Entire group killed
       nextGroups.splice(groupIndex, 1);
       if (nextGroups.length === 0) {
-        const fallbackTermId = crypto.randomUUID();
-        const fallbackGroupId = crypto.randomUUID();
-        nextGroups = [{ id: fallbackGroupId, terminals: [{ id: fallbackTermId, cwd: workingDirectory }], activeTerminalId: fallbackTermId }];
-        nextActiveGroupId = fallbackGroupId;
+        nextActiveGroupId = '';
         if (onClose) onClose(); // Gracefully collapse UI since everything died
       } else {
         nextActiveGroupId = nextGroups[Math.max(0, groupIndex - 1)].id;
