@@ -17,10 +17,14 @@ interface EditorProps {
   wordWrap: boolean;
   onChange?: (value: string) => void;
   onFocus?: () => void;
+  onScrollRatio?: (ratio: number) => void;
+  syncScrollRatio?: number;
 }
 
 export interface EditorHandle {
   focus: () => void;
+  setScrollRatio: (ratio: number) => void;
+  jumpToLine: (line: number) => void;
 }
 
 const externalDocUpdate = Annotation.define<boolean>();
@@ -56,16 +60,61 @@ function editorAppearance(theme: Theme, fontSize: number, fontFamily: string) {
   }, { dark: theme.dark });
 }
 
-const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, onChange, onFocus }, ref) {
+const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, onChange, onFocus, onScrollRatio, syncScrollRatio }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const statesRef = useRef(new Map<string, EditorState>());
   const activeTabRef = useRef(tabId);
   const onChangeRef = useRef(onChange);
+  const onScrollRatioRef = useRef(onScrollRatio);
+  const isProgrammaticScrollRef = useRef(false);
 
-  useImperativeHandle(ref, () => ({ focus: () => viewRef.current?.focus() }), []);
+  useImperativeHandle(ref, () => ({
+    focus: () => viewRef.current?.focus(),
+    setScrollRatio: (ratio: number) => {
+      const scrollDOM = viewRef.current?.scrollDOM;
+      if (scrollDOM) {
+        const max = scrollDOM.scrollHeight - scrollDOM.clientHeight;
+        if (max > 0) {
+          isProgrammaticScrollRef.current = true;
+          scrollDOM.scrollTop = ratio * max;
+          requestAnimationFrame(() => {
+            isProgrammaticScrollRef.current = false;
+          });
+        }
+      }
+    },
+    jumpToLine: (line: number) => {
+      const view = viewRef.current;
+      if (!view) return;
+      const totalLines = view.state.doc.lines;
+      const target = Math.min(Math.max(1, line), totalLines);
+      const lineObj = view.state.doc.line(target);
+      view.dispatch({
+        selection: { anchor: lineObj.from },
+        scrollIntoView: true,
+      });
+      view.focus();
+    },
+  }), []);
 
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+  useEffect(() => { onScrollRatioRef.current = onScrollRatio; }, [onScrollRatio]);
+
+  useEffect(() => {
+    if (syncScrollRatio == null || !viewRef.current) return;
+    const scrollDOM = viewRef.current.scrollDOM;
+    const max = scrollDOM.scrollHeight - scrollDOM.clientHeight;
+    if (max <= 0) return;
+    const currentRatio = scrollDOM.scrollTop / max;
+    if (Math.abs(currentRatio - syncScrollRatio) > 0.005) {
+      isProgrammaticScrollRef.current = true;
+      scrollDOM.scrollTop = syncScrollRatio * max;
+      requestAnimationFrame(() => {
+        isProgrammaticScrollRef.current = false;
+      });
+    }
+  }, [syncScrollRatio]);
 
   const createState = (content: string, currentTheme: Theme, currentFontSize: number) => EditorState.create({
     doc: content,
@@ -90,7 +139,20 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, pa
     const view = new EditorView({ state, parent: containerRef.current });
     viewRef.current = view;
     statesRef.current.set(tabId, state);
-    return () => { viewRef.current = null; view.destroy(); };
+
+    const scrollDOM = view.scrollDOM;
+    const handleScroll = () => {
+      if (isProgrammaticScrollRef.current) return;
+      const max = scrollDOM.scrollHeight - scrollDOM.clientHeight;
+      if (max > 0) onScrollRatioRef.current?.(scrollDOM.scrollTop / max);
+    };
+    scrollDOM.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      scrollDOM.removeEventListener('scroll', handleScroll);
+      viewRef.current = null;
+      view.destroy();
+    };
   }, []);
 
   useEffect(() => {

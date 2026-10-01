@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { readFile } from '@tauri-apps/plugin-fs';
@@ -10,6 +10,8 @@ interface Props {
   onOpenFile: (path: string) => void;
   onClose: () => void;
   onActivate: () => void;
+  syncScrollRatio?: number;
+  onScrollRatio?: (ratio: number) => void;
 }
 
 function isRemote(source: string) {
@@ -54,10 +56,43 @@ function PreviewImage({ src, alt, path }: { src?: string; alt?: string; path: st
   return resolvedSource ? <img src={resolvedSource} alt={alt ?? ''} /> : <span className="markdown-image-fallback">{alt || src || 'Image unavailable'}</span>;
 }
 
-export default function MarkdownPreview({ content, path, onOpenFile, onClose, onActivate }: Props) {
+export default function MarkdownPreview({ content, path, onOpenFile, onClose, onActivate, syncScrollRatio, onScrollRatio }: Props) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const isProgrammaticScrollRef = useRef(false);
+  const onScrollRatioRef = useRef(onScrollRatio);
+
+  useEffect(() => { onScrollRatioRef.current = onScrollRatio; }, [onScrollRatio]);
+
+  useEffect(() => {
+    if (syncScrollRatio == null || !scrollRef.current) return;
+    const el = scrollRef.current;
+    const max = el.scrollHeight - el.clientHeight;
+    if (max <= 0) return;
+    const currentRatio = el.scrollTop / max;
+    if (Math.abs(currentRatio - syncScrollRatio) > 0.005) {
+      isProgrammaticScrollRef.current = true;
+      el.scrollTop = syncScrollRatio * max;
+      requestAnimationFrame(() => {
+        isProgrammaticScrollRef.current = false;
+      });
+    }
+  }, [syncScrollRatio]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      if (isProgrammaticScrollRef.current) return;
+      const max = el.scrollHeight - el.clientHeight;
+      if (max > 0) onScrollRatioRef.current?.(el.scrollTop / max);
+    };
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, []);
+
   return <section className="markdown-preview" aria-label="Markdown preview" onMouseDown={onActivate}>
     <div className="markdown-preview-header"><span>PREVIEW · {path.split(/[\\/]/).pop()}</span><button aria-label="Close Markdown preview" title="Close preview" onClick={onClose}>×</button></div>
-    <div className="markdown-preview-scroll">
+    <div ref={scrollRef} className="markdown-preview-scroll">
       <article className="markdown-body">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}

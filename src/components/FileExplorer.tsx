@@ -46,20 +46,18 @@ function TreeNode({ entry, path, level, refresh, activeFilePath, onFileSelect, o
 }
 
 interface Props {
+  rootPath: string | null;
   onFileSelect: (path: string) => void;
   onFileOpenInSplit: (path: string) => void;
   activeFilePath: string | null;
   onRename: (oldPath: string, newPath: string, isDirectory: boolean) => void;
   onDelete: (path: string, isDirectory: boolean) => void;
-  onRootPathChange: (path: string | null) => void;
   onFolderOpened: (path: string) => void;
-  terminalFolderRequest: { path: string; sequence: number } | null;
   onOpenTerminalFolder: () => void;
   terminalFolderError: string | null;
 }
 
-export default function FileExplorer({ onFileSelect, onFileOpenInSplit, activeFilePath, onRename, onDelete, onRootPathChange, onFolderOpened, terminalFolderRequest, onOpenTerminalFolder, terminalFolderError }: Props) {
-  const [rootPath, setRootPath] = useState<string | null>(null);
+export default function FileExplorer({ rootPath, onFileSelect, onFileOpenInSplit, activeFilePath, onRename, onDelete, onFolderOpened, onOpenTerminalFolder, terminalFolderError }: Props) {
   const [rootFiles, setRootFiles] = useState<DirEntry[]>([]);
   const [refresh, setRefresh] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -68,13 +66,9 @@ export default function FileExplorer({ onFileSelect, onFileOpenInSplit, activeFi
   const [menu, setMenu] = useState<{ x: number; y: number; target: Target } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { onRootPathChange(rootPath); }, [rootPath, onRootPathChange]);
-
+  useEffect(() => { setRootFiles([]); setError(null); }, [rootPath]);
   useEffect(() => {
-    if (terminalFolderRequest) { setRootPath(terminalFolderRequest.path); setRefresh(value => value + 1); }
-  }, [terminalFolderRequest]);
-  useEffect(() => {
-    if (!rootPath) return;
+    if (!rootPath) { setRootFiles([]); return; }
     let cancelled = false;
     readDir(rootPath).then(items => { if (!cancelled) { setRootFiles(visibleEntries(items)); setError(null); } })
       .catch(reason => { if (!cancelled) setError(`Could not open folder: ${String(reason)}`); });
@@ -95,11 +89,6 @@ export default function FileExplorer({ onFileSelect, onFileOpenInSplit, activeFi
     try {
       const selected = await open({ directory: true, multiple: false });
       if (typeof selected === 'string') {
-        const items = await readDir(selected);
-        setRootFiles(visibleEntries(items));
-        setRootPath(selected);
-        setRefresh(value => value + 1);
-        setError(null);
         onFolderOpened(selected);
       }
     } catch (reason) { setError(`Could not open folder: ${String(reason)}`); }
