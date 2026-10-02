@@ -29,15 +29,17 @@ interface TerminalProps {
   id: string;
   isActive: boolean;
   shell?: string;
+  cwd?: string | null;
   onClick: () => void;
   onTitleChange?: (title: string) => void;
   onSessionChange?: (id: string, sessionId: string | null) => void;
   theme: Theme;
   fontSize: number;
+  fontFamily: string;
   focusRequest: number;
 }
 
-export default function Terminal({ id, isActive, shell, onClick, onTitleChange, onSessionChange, theme, fontSize, focusRequest }: TerminalProps) {
+export default function Terminal({ id, isActive, shell, cwd, onClick, onTitleChange, onSessionChange, theme, fontSize, fontFamily, focusRequest }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -50,7 +52,7 @@ export default function Terminal({ id, isActive, shell, onClick, onTitleChange, 
 
     // Initialize xterm.js
     const term = new XTerm({
-      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+      fontFamily: `'${fontFamily}', monospace`,
       fontSize,
       theme: terminalTheme(theme),
       cursorBlink: true,
@@ -63,6 +65,9 @@ export default function Terminal({ id, isActive, shell, onClick, onTitleChange, 
 
     term.open(terminalRef.current);
     let unlistenPromise: Promise<() => void> | null = null;
+    let spawnPromise: Promise<void> | null = null;
+    let disposed = false;
+    let clearPromptTimeout: ReturnType<typeof setTimeout> | null = null;
     let resizeListener: { dispose: () => void } | null = null;
 
     // Delay spawning by 50ms so CSS Engine perfectly calculates width/height.
@@ -71,16 +76,21 @@ export default function Terminal({ id, isActive, shell, onClick, onTitleChange, 
     const spawnTimeout = setTimeout(() => {
       fitAddon.fit();
 
-      invoke('spawn_pty', { id: sessionId, rows: term.rows, cols: term.cols, shell }).catch((err) => {
+      spawnPromise = invoke<void>('spawn_pty', { id: sessionId, rows: term.rows, cols: term.cols, shell, cwd });
+      void spawnPromise.then(() => {
+        if (!disposed) {
+          clearPromptTimeout = setTimeout(() => {
+            if (!disposed) void invoke('write_pty', { id: sessionId, data: '\x0c' }).catch(console.error);
+          }, 250);
+        }
+      }).catch(() => { /* The error is shown by the handler below. */ });
+      void spawnPromise.catch((err) => {
         console.error(err);
-        term.write(`\r\n\x1b[1;31mError spawning PTY: ${err}\x1b[0m\r\n`);
-      }).then(() => {
-        // macOS Zsh specific hack to clear the three buggy initialization prompts reliably
-        setTimeout(() => invoke('write_pty', { id: sessionId, data: '\x0c' }).catch(console.error), 250);
+        if (!disposed) term.write(`\r\n\x1b[1;31mError spawning PTY: ${err}\x1b[0m\r\n`);
       });
 
       unlistenPromise = listen<PtyPayload>('pty-output', (event) => {
-        if (event.payload.id === sessionId) {
+        if (!disposed && event.payload.id === sessionId) {
           term.write(event.payload.data);
         }
       });
@@ -111,16 +121,20 @@ export default function Terminal({ id, isActive, shell, onClick, onTitleChange, 
     observer.observe(terminalRef.current);
 
     return () => {
+      disposed = true;
       onSessionChange?.(id, null);
       clearTimeout(spawnTimeout);
+      if (clearPromptTimeout) clearTimeout(clearPromptTimeout);
       observer.disconnect();
       if (resizeListener) resizeListener.dispose();
       titleListener.dispose();
       term.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
-      if (unlistenPromise) unlistenPromise.then(un => un());
-      invoke('kill_pty', { id: sessionId }).catch(console.error);
+      if (unlistenPromise) void unlistenPromise.then(un => un()).catch(console.error);
+      if (spawnPromise) {
+        void spawnPromise.then(() => invoke('kill_pty', { id: sessionId })).catch(console.error);
+      }
     };
   }, []);
 
@@ -129,8 +143,9 @@ export default function Terminal({ id, isActive, shell, onClick, onTitleChange, 
     if (!term) return;
     term.options.theme = terminalTheme(theme);
     term.options.fontSize = fontSize;
+    term.options.fontFamily = `'${fontFamily}', monospace`;
     if (term.element?.clientWidth) fitAddonRef.current?.fit();
-  }, [theme, fontSize]);
+  }, [theme, fontSize, fontFamily]);
 
   useEffect(() => {
     if (focusRequest > 0 && isActive) xtermRef.current?.focus();

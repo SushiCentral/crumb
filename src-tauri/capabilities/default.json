@@ -19,15 +19,21 @@
     },
     {
       "identifier": "fs:allow-read-text-file",
-      "allow": [{ "path": "**" }]
+      "allow": [{ "path": "**" }, { "path": "**/.gitignore" }]
     },
     {
       "identifier": "fs:allow-write-text-file",
-      "allow": [{ "path": "**" }]
+      "allow": [{ "path": "**" }, { "path": "**/.gitignore" }]
     },
     {
       "identifier": "fs:allow-stat",
       "allow": [{ "path": "**" }]
-    }
+    },
+    { "identifier": "fs:allow-create", "allow": [{ "path": "**" }] },
+    { "identifier": "fs:allow-mkdir", "allow": [{ "path": "**" }] },
+    { "identifier": "fs:allow-exists", "allow": [{ "path": "**" }] },
+    { "identifier": "fs:allow-rename", "allow": [{ "path": "**" }] },
+    { "identifier": "fs:allow-remove", "allow": [{ "path": "**" }] },
+    { "identifier": "fs:allow-watch", "allow": [{ "path": "**" }] }
   ]
 }

@@ -3,11 +3,13 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 use tauri::{Emitter, State};
 
 struct PtySession {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+    child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
     process_id: Option<u32>,
 }
 
@@ -54,6 +56,7 @@ fn spawn_pty(
     rows: u16,
     cols: u16,
     shell: Option<String>,
+    cwd: Option<String>,
     app_handle: tauri::AppHandle,
     state: State<'_, PtyState>,
 ) -> Result<(), String> {
@@ -78,8 +81,15 @@ fn spawn_pty(
 
     let mut cmd = CommandBuilder::new(default_shell);
     cmd.env("TERM", "xterm-256color");
+    if let Some(directory) = cwd {
+        if !std::path::Path::new(&directory).is_dir() {
+            return Err(format!("Terminal directory is unavailable: {directory}"));
+        }
+        cmd.cwd(directory);
+    }
     let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     let process_id = child.process_id();
+    let child_arc = Arc::new(Mutex::new(child));
 
     drop(pair.slave);
 
@@ -93,6 +103,7 @@ fn spawn_pty(
             PtySession {
                 writer: Arc::new(Mutex::new(writer)),
                 master: Arc::new(Mutex::new(pair.master)),
+                child: Arc::clone(&child_arc),
                 process_id,
             },
         );
@@ -115,6 +126,27 @@ fn spawn_pty(
                 }
                 _ => break,
             }
+        }
+    });
+
+    let monitored_sessions = Arc::clone(&state.sessions);
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_millis(300));
+        let registered = monitored_sessions
+            .lock()
+            .ok()
+            .and_then(|sessions| sessions.get(&id).map(|session| Arc::ptr_eq(&session.child, &child_arc)))
+            .unwrap_or(false);
+        if !registered {
+            break;
+        }
+        match child_arc.lock() {
+            Ok(mut child) => {
+                if !matches!(child.try_wait(), Ok(None)) {
+                    break;
+                }
+            }
+            Err(_) => break,
         }
     });
 
@@ -155,7 +187,13 @@ fn get_pty_cwd(id: String, state: State<'_, PtyState>) -> Result<String, String>
         return Err("Could not read the terminal directory.".to_string());
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(target_os = "windows")]
+    {
+        let _ = process_id;
+        Err("Reading terminal working directory is not supported on Windows.".to_string())
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
         let _ = process_id;
         Err("Opening the terminal directory is not supported on this platform yet.".to_string())
@@ -193,8 +231,26 @@ fn resize_pty(id: String, rows: u16, cols: u16, state: State<'_, PtyState>) -> R
 
 #[tauri::command]
 fn kill_pty(id: String, state: State<'_, PtyState>) -> Result<(), String> {
-    let mut sessions = state.sessions.lock().unwrap();
-    sessions.remove(&id);
+    let session = state
+        .sessions
+        .lock()
+        .map_err(|e| e.to_string())?
+        .remove(&id);
+    if let Some(session) = session {
+        let mut child = session.child.lock().map_err(|e| e.to_string())?;
+        if child.try_wait().map_err(|e| e.to_string())?.is_none() {
+            match child.kill() {
+                Ok(()) => {
+                    child.wait().map_err(|e| e.to_string())?;
+                }
+                Err(error) => {
+                    if child.try_wait().map_err(|e| e.to_string())?.is_none() {
+                        return Err(format!("Could not stop terminal process: {error}"));
+                    }
+                }
+            }
+        }
+    }
     Ok(())
 }
 

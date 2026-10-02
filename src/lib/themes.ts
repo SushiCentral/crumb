@@ -4,6 +4,8 @@ export interface Theme {
   id: string;
   name: string;
   dark: boolean;
+  uiFont: string;
+  codeFont: string;
   colors: {
     activity: string; sidebar: string; editor: string; panel: string;
     panelHeader: string; terminal: string; terminalSidebar: string; surface: string;
@@ -21,6 +23,7 @@ export interface Theme {
 export const themes: Theme[] = [
   {
     id: 'crumb', name: 'Crumb', dark: true,
+    uiFont: 'Inter', codeFont: 'JetBrains Mono',
     colors: {
       activity: '#171d27', sidebar: '#202937', editor: '#151b24', panel: '#1b2531',
       panelHeader: '#263244', terminal: '#101821', terminalSidebar: '#16202b', surface: '#29384a',
@@ -36,6 +39,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'one-dark', name: 'One Dark', dark: true,
+    uiFont: 'Inter', codeFont: 'JetBrains Mono',
     colors: {
       activity: '#21252b', sidebar: '#282c34', editor: '#2c313c', panel: '#242933',
       panelHeader: '#21252b', terminal: '#1f2329', terminalSidebar: '#282c34', surface: '#353b45',
@@ -51,6 +55,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'dracula', name: 'Dracula', dark: true,
+    uiFont: 'Space Grotesk', codeFont: 'Fira Code',
     colors: {
       activity: '#21222c', sidebar: '#282a36', editor: '#2d3040', panel: '#262837',
       panelHeader: '#343746', terminal: '#21222c', terminalSidebar: '#282a36', surface: '#3d4052',
@@ -66,6 +71,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'catppuccin-mocha', name: 'Catppuccin Mocha', dark: true,
+    uiFont: 'Inter', codeFont: 'JetBrains Mono',
     colors: {
       activity: '#11111b', sidebar: '#181825', editor: '#1e1e2e', panel: '#181825',
       panelHeader: '#242439', terminal: '#11111b', terminalSidebar: '#181825', surface: '#313244',
@@ -81,6 +87,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'catppuccin-latte', name: 'Catppuccin Latte', dark: false,
+    uiFont: 'Inter', codeFont: 'JetBrains Mono',
     colors: {
       activity: '#dce0e8', sidebar: '#e6e9ef', editor: '#eff1f5', panel: '#e6e9ef',
       panelHeader: '#dce0e8', terminal: '#f7f8fa', terminalSidebar: '#dce0e8', surface: '#ccd0da',
@@ -94,16 +101,108 @@ export const themes: Theme[] = [
       type: '#8b6500', property: '#c01c45', tag: '#c01c45', attribute: '#b04d00',
     },
   },
+  {
+    id: 'nord', name: 'Nord', dark: true,
+    uiFont: 'Inter', codeFont: 'IBM Plex Mono',
+    colors: {
+      activity: '#252d3b', sidebar: '#2e3747', editor: '#303b4d', panel: '#273242',
+      panelHeader: '#39475a', terminal: '#242e3d', terminalSidebar: '#303c4d', surface: '#405066',
+      border: '#52637a', text: '#eceff4', muted: '#c7d0de', subtle: '#a7b5c8',
+      accent: '#88c0d0', accentText: '#172b31', hover: '#405168', selection: '#49697b',
+      gutter: '#a7b5c8', activeLine: '#3b4b60', warning: '#ebcb8b', button: '#88c0d0',
+    },
+    syntax: {
+      keyword: '#b48ead', function: '#88c0d0', variable: '#eceff4', string: '#a3be8c',
+      number: '#d08770', comment: '#a7b5c8', operator: '#81a1c1', punctuation: '#d8dee9',
+      type: '#ebcb8b', property: '#8fbcbb', tag: '#bf616a', attribute: '#d08770',
+    },
+  },
+  {
+    id: 'tokyo-night', name: 'Tokyo Night', dark: true,
+    uiFont: 'Space Grotesk', codeFont: 'JetBrains Mono',
+    colors: {
+      activity: '#13141f', sidebar: '#1a1b2b', editor: '#1a1b26', panel: '#161725',
+      panelHeader: '#23243a', terminal: '#11121d', terminalSidebar: '#1b1c2c', surface: '#2b2d48',
+      border: '#3b3d58', text: '#c0caf5', muted: '#a9b3dc', subtle: '#8993b9',
+      accent: '#7aa2f7', accentText: '#121b31', hover: '#30334f', selection: '#36446e',
+      gutter: '#8993b9', activeLine: '#24283b', warning: '#e0af68', button: '#7aa2f7',
+    },
+    syntax: {
+      keyword: '#bb9af7', function: '#7aa2f7', variable: '#c0caf5', string: '#9ece6a',
+      number: '#ff9e64', comment: '#8993b9', operator: '#89ddff', punctuation: '#a9b1d6',
+      type: '#e0af68', property: '#73daca', tag: '#f7768e', attribute: '#ff9e64',
+    },
+  },
+  {
+    id: 'gruvbox-dark', name: 'Gruvbox Dark', dark: true,
+    uiFont: 'Space Grotesk', codeFont: 'IBM Plex Mono',
+    colors: {
+      activity: '#1d1b19', sidebar: '#282420', editor: '#282828', panel: '#24211e',
+      panelHeader: '#39312a', terminal: '#1e1c1a', terminalSidebar: '#302a24', surface: '#453b32',
+      border: '#5a4d3e', text: '#ebdbb2', muted: '#c8b995', subtle: '#ad9d7c',
+      accent: '#fabd2f', accentText: '#302417', hover: '#504437', selection: '#66563a',
+      gutter: '#ad9d7c', activeLine: '#3c3836', warning: '#fe8019', button: '#fabd2f',
+    },
+    syntax: {
+      keyword: '#fb4934', function: '#8ec07c', variable: '#ebdbb2', string: '#b8bb26',
+      number: '#d3869b', comment: '#a89984', operator: '#fe8019', punctuation: '#d5c4a1',
+      type: '#fabd2f', property: '#83a598', tag: '#fb4934', attribute: '#fe8019',
+    },
+  },
+  {
+    id: 'rose-pine', name: 'Rosé Pine', dark: true,
+    uiFont: 'Space Grotesk', codeFont: 'Fira Code',
+    colors: {
+      activity: '#15131d', sidebar: '#1d1b27', editor: '#191724', panel: '#211f2c',
+      panelHeader: '#2b2938', terminal: '#14121c', terminalSidebar: '#242230', surface: '#393644',
+      border: '#524f63', text: '#e0def4', muted: '#b9b8d0', subtle: '#908da8',
+      accent: '#ebbcba', accentText: '#33252c', hover: '#403b4b', selection: '#51465c',
+      gutter: '#908da8', activeLine: '#26233a', warning: '#f6c177', button: '#ebbcba',
+    },
+    syntax: {
+      keyword: '#c4a7e7', function: '#9ccfd8', variable: '#e0def4', string: '#a6d1a9',
+      number: '#f6c177', comment: '#908da8', operator: '#ebbcba', punctuation: '#c7c5df',
+      type: '#f6c177', property: '#ebbcba', tag: '#eb6f92', attribute: '#f6c177',
+    },
+  },
+  {
+    id: 'solarized-light', name: 'Solarized Light', dark: false,
+    uiFont: 'Inter', codeFont: 'IBM Plex Mono',
+    colors: {
+      activity: '#e3d9bd', sidebar: '#eee5cb', editor: '#fdf6e3', panel: '#f2ead4',
+      panelHeader: '#e8dec4', terminal: '#fff9e9', terminalSidebar: '#e9dfc7', surface: '#ddd2b7',
+      border: '#c9bd9f', text: '#4f5d5d', muted: '#596a6b', subtle: '#667678',
+      accent: '#267e92', accentText: '#ffffff', hover: '#e4d9bf', selection: '#c1dce0',
+      gutter: '#667678', activeLine: '#eee8d5', warning: '#a75d00', button: '#267e92',
+    },
+    syntax: {
+      keyword: '#6c43a0', function: '#176a9d', variable: '#4f5d5d', string: '#397d0d',
+      number: '#b14c17', comment: '#657578', operator: '#178080', punctuation: '#596a6b',
+      type: '#986600', property: '#c12a35', tag: '#c12a35', attribute: '#b14c17',
+    },
+  },
 ];
 
 export const defaultTheme = themes[0];
+export const codeFonts = ['JetBrains Mono', 'IBM Plex Mono', 'Fira Code'] as const;
 
 export function getTheme(id: string): Theme {
   return themes.find(theme => theme.id === id) ?? defaultTheme;
 }
 
-export function themeVariables(theme: Theme): CSSProperties {
-  return Object.fromEntries(
+export function themeVariables(theme: Theme, codeFont = theme.codeFont): CSSProperties {
+  return {
+    ...Object.fromEntries(
     Object.entries(theme.colors).map(([key, value]) => [`--${key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}`, value]),
-  ) as CSSProperties;
+    ),
+    '--ui-font': `'${theme.uiFont}', sans-serif`,
+    '--code-font': `'${codeFont}', monospace`,
+    '--label-heading': `color-mix(in srgb, ${theme.syntax.keyword} 80%, ${theme.colors.text})`,
+    '--label-active': `color-mix(in srgb, ${theme.colors.accent} 85%, ${theme.colors.text})`,
+    '--label-detail': theme.id === 'solarized-light'
+      ? '#346767'
+      : `color-mix(in srgb, ${theme.syntax.operator} 60%, ${theme.colors.text})`,
+    '--label-context': `color-mix(in srgb, ${theme.syntax.type} 70%, ${theme.colors.text})`,
+    '--label-inactive': `color-mix(in srgb, ${theme.colors.muted} 72%, ${theme.syntax.keyword})`,
+  } as CSSProperties;
 }
