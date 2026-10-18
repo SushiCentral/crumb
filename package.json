@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test": "node --test tests/",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "cross-env WEBKIT_DISABLE_DMABUF_RENDERER=1 tauri dev"
