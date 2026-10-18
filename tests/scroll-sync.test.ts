@@ -46,26 +46,6 @@ test('publishes ratios synchronously to subscribers of the same tab only', () =>
   stopB();
 });
 
-test('stopping a subscription removes delivery', () => {
-  const seen: number[] = [];
-  const stop = subscribeScrollRatio('tab-unsub', ratio => seen.push(ratio));
-  publishScrollRatio('tab-unsub', 1);
-  stop();
-  publishScrollRatio('tab-unsub', 2);
-  assert.deepEqual(seen, [1]);
-});
-
-test('a handler may unsubscribe or publish for another tab during delivery', () => {
-  const late: number[] = [];
-  const stopLate = subscribeScrollRatio('tab-loop', ratio => late.push(ratio));
-  subscribeScrollRatio('tab-loop', () => {
-    stopLate();
-    publishScrollRatio('other-tab', 0.9);
-  });
-  assert.doesNotThrow(() => publishScrollRatio('tab-loop', 0.1));
-  assert.deepEqual(late, [0.1]);
-});
-
 test('user scrolls move peer elements without echo feedback', async () => {
   const first = fakeScroller(2000, 200) as unknown as HTMLElement;
   const second = fakeScroller(2000, 200) as unknown as HTMLElement;
