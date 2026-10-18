@@ -52,6 +52,7 @@ const TerminalIcon = () => (
 
 interface BottomPanelProps {
   isOpen: boolean;
+  clearPromptOnStart: boolean;
   onClose?: () => void;
   onActiveSessionChange: (sessionId: string | null) => void;
   theme: Theme;
@@ -74,7 +75,7 @@ interface TerminalGroup {
   activeTerminalId: string;
 }
 
-export default function BottomPanel({ isOpen, onClose, onActiveSessionChange, theme, fontSize, fontFamily, focusRequest, workingDirectory, openTerminalRequest }: BottomPanelProps) {
+export default function BottomPanel({ isOpen, clearPromptOnStart, onClose, onActiveSessionChange, theme, fontSize, fontFamily, focusRequest, workingDirectory, openTerminalRequest }: BottomPanelProps) {
   const [activeTab, setActiveTab] = useState<'terminal' | 'output' | 'problems'>('terminal');
   
   // Terminal Multiplexing State - Initialized lazily to avoid Date clock drifts in strict mode
@@ -306,6 +307,7 @@ export default function BottomPanel({ isOpen, onClose, onActiveSessionChange, th
                   >
                     <Terminal
                       id={term.id}
+                      clearPromptOnStart={clearPromptOnStart}
                       theme={theme}
                       fontSize={fontSize}
                       fontFamily={fontFamily}

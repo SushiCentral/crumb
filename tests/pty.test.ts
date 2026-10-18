@@ -29,7 +29,7 @@ function harness() {
       return undefined;
     },
   };
-  const start = () => startPtySession(transport, { rows: 24, cols: 80, onOutput: data => outputs.push(data), onError: error => errors.push(error) });
+  const start = (clearPromptOnStart = false) => startPtySession(transport, { rows: 24, cols: 80, clearPromptOnStart, onOutput: data => outputs.push(data), onError: error => errors.push(error) });
   return { start, transport, calls, outputs, errors, registration, spawn,
     emit: (id: string, data: string) => listener?.({ payload: { id, data } }),
     unlisten: () => { unlistens++; },
@@ -153,4 +153,49 @@ test('async unlisten rejection is reported without an unhandled rejection', asyn
   session.dispose();
   await tick();
   assert.match(h.errors.join(' '), /async unlisten rejected/);
+});
+
+test('prompt clearing is opt-in and only happens after successful startup', async context => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = harness();
+  const session = h.start(true);
+  h.registration.resolve(h.unlisten);
+  await tick();
+  context.mock.timers.tick(500);
+  await tick();
+  assert.equal(h.calls.filter(call => call.command === 'write_pty').length, 0);
+  h.spawn.resolve();
+  await tick();
+  context.mock.timers.tick(250);
+  await tick();
+  assert.deepEqual(h.calls.filter(call => call.command === 'write_pty').map(call => call.args?.data), ['\x0c']);
+  session.dispose();
+  await tick();
+});
+
+test('disposing a terminal cancels its pending prompt clear', async context => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = harness();
+  const session = h.start(true);
+  h.registration.resolve(h.unlisten);
+  h.spawn.resolve();
+  await tick();
+  session.dispose();
+  context.mock.timers.tick(500);
+  await tick();
+  assert.equal(h.calls.filter(call => call.command === 'write_pty').length, 0);
+});
+
+test('default startup never sends Ctrl-L', async context => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = harness();
+  const session = h.start();
+  h.registration.resolve(h.unlisten);
+  h.spawn.resolve();
+  await tick();
+  context.mock.timers.tick(1000);
+  await tick();
+  assert.equal(h.calls.filter(call => call.command === 'write_pty').length, 0);
+  session.dispose();
+  await tick();
 });

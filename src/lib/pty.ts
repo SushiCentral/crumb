@@ -10,6 +10,7 @@ export interface PtySessionOptions {
   cols: number;
   shell?: string;
   cwd?: string | null;
+  clearPromptOnStart?: boolean;
   onOutput(data: string): void;
   onError(message: string): void;
 }
@@ -30,6 +31,7 @@ export function startPtySession(transport: PtyTransport, options: PtySessionOpti
   let writes: string[] = [];
   let pendingSize: { rows: number; cols: number } | undefined;
   let commands = Promise.resolve();
+  let clearPromptTimer: ReturnType<typeof setTimeout> | undefined;
 
   const report = (error: unknown) => options.onError(String(error));
   const call = (command: string, args: Record<string, unknown>) => {
@@ -54,6 +56,11 @@ export function startPtySession(transport: PtyTransport, options: PtySessionOpti
       pendingSize = undefined;
       for (const data of writes) call('write_pty', { id, data });
       writes = [];
+      if (options.clearPromptOnStart) {
+        clearPromptTimer = setTimeout(() => {
+          if (!disposed && !failed) call('write_pty', { id, data: '\x0c' });
+        }, 250);
+      }
     } catch (error) {
       failed = true;
       writes = [];
@@ -78,6 +85,7 @@ export function startPtySession(transport: PtyTransport, options: PtySessionOpti
     dispose() {
       if (disposed) return;
       disposed = true;
+      if (clearPromptTimer !== undefined) clearTimeout(clearPromptTimer);
       writes = [];
       pendingSize = undefined;
       stopListening();

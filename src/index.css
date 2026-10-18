@@ -958,6 +958,7 @@ button:focus-visible, .quick-open:focus-within { outline: 2px solid var(--accent
 .settings-modal {
   width: min(720px, 100%);
   max-height: 85vh;
+  height: min(700px, 85vh);
   display: flex;
   flex-direction: column;
   background: var(--surface);
@@ -998,12 +999,18 @@ button:focus-visible, .quick-open:focus-within { outline: 2px solid var(--accent
 .settings-close-btn:hover { background: var(--hover); color: var(--text); }
 .settings-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 24px;
   display: flex;
   flex-direction: column;
   gap: 28px;
 }
+.settings-tabs { display: flex; flex: none; padding: 0 18px; gap: 6px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.settings-tabs button { flex: none; padding: 12px 10px; border: 0; border-bottom: 2px solid transparent; color: var(--muted); background: none; font: 500 12px var(--ui-font); cursor: pointer; }
+.settings-tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.settings-tabs button:hover { background: var(--hover); }
+.settings-modal button:focus-visible, .settings-modal input:focus-visible, .settings-modal select:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .settings-section-title {
   font-size: 14px;
   font-weight: 600;
@@ -1019,7 +1026,7 @@ button:focus-visible, .quick-open:focus-within { outline: 2px solid var(--accent
 }
 .theme-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
   gap: 12px;
 }
 .theme-card {
@@ -1036,23 +1043,13 @@ button:focus-visible, .quick-open:focus-within { outline: 2px solid var(--accent
 }
 .theme-card:hover {
   border-color: var(--accent);
-  transform: translateY(-1px);
 }
 .theme-card.active {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
   background: var(--selection);
 }
-.theme-card-preview {
-  display: flex;
-  gap: 4px;
-  height: 20px;
-}
-.theme-card-preview .swatch {
-  flex: 1;
-  border-radius: 4px;
-  border: 1px solid rgba(0, 0, 0, 0.2);
-}
+.theme-code-preview { width: 100%; margin: 0; padding: 10px; border-radius: 4px; overflow: hidden; font-size: 10px; line-height: 1.6; white-space: pre; }
 .theme-card-footer {
   display: flex;
   align-items: center;
@@ -1134,6 +1131,7 @@ button:focus-visible, .quick-open:focus-within { outline: 2px solid var(--accent
   line-height: 1.6;
 }
 .toggle-switch {
+  flex: none;
   width: 44px;
   height: 24px;
   border-radius: 12px;
@@ -1168,6 +1166,7 @@ button:focus-visible, .quick-open:focus-within { outline: 2px solid var(--accent
   justify-content: flex-end;
 }
 .settings-done-btn {
+  flex: none;
   padding: 7px 18px;
   border-radius: 6px;
   background: var(--button);
@@ -1176,6 +1175,12 @@ button:focus-visible, .quick-open:focus-within { outline: 2px solid var(--accent
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
+}
+@media (max-width: 560px) {
+  .settings-overlay { padding: 10px; }
+  .settings-header, .settings-body { padding: 16px; }
+  .settings-row { flex-wrap: wrap; }
+  .settings-row-label { flex: 1; min-width: 150px; }
 }
 
 /* Enhanced Output & Problems Panel */

@@ -32,9 +32,10 @@ interface TerminalProps {
   fontSize: number;
   fontFamily: string;
   focusRequest: number;
+  clearPromptOnStart: boolean;
 }
 
-export default function Terminal({ id, isActive, shell, cwd, onClick, onTitleChange, onSessionChange, theme, fontSize, fontFamily, focusRequest }: TerminalProps) {
+export default function Terminal({ id, isActive, shell, cwd, onClick, onTitleChange, onSessionChange, theme, fontSize, fontFamily, focusRequest, clearPromptOnStart }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -65,7 +66,7 @@ export default function Terminal({ id, isActive, shell, cwd, onClick, onTitleCha
       fitAddon.fit();
 
       session = startPtySession(tauriPtyTransport, {
-        rows: term.rows, cols: term.cols, shell, cwd,
+        rows: term.rows, cols: term.cols, shell, cwd, clearPromptOnStart,
         onOutput: data => { if (!disposed) term.write(data); },
         onError: error => {
           console.error(error);

@@ -35,7 +35,6 @@ const externalDocUpdate = Annotation.define<boolean>();
 const syntaxCompartment = new Compartment();
 const languageCompartment = new Compartment();
 const appearanceCompartment = new Compartment();
-const wrappingCompartment = new Compartment();
 const preferencesCompartment = new Compartment();
 
 function editorAppearance(theme: Theme, fontSize: number, fontFamily: string) {
@@ -128,10 +127,9 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, pa
     extensions: [
       syntaxCompartment.of(Prec.highest(createSyntaxHighlighting(currentTheme))),
       editorCoreExtensions,
-      preferencesCompartment.of(editorPreferenceExtensions(preferences)),
+      preferencesCompartment.of([editorPreferenceExtensions(preferences), wordWrap ? EditorView.lineWrapping : []]),
       languageCompartment.of([]),
       appearanceCompartment.of(editorAppearance(currentTheme, currentFontSize, fontFamily)),
-      wrappingCompartment.of(wordWrap ? EditorView.lineWrapping : []),
       EditorView.updateListener.of(update => {
         if (update.docChanged || update.selectionSet) onCursorChangeRef.current?.(cursorInfo(update.state));
         if (!update.docChanged) return;
@@ -177,8 +175,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, pa
       effects: [
         syntaxCompartment.reconfigure(Prec.highest(createSyntaxHighlighting(theme))),
         appearanceCompartment.reconfigure(editorAppearance(theme, fontSize, fontFamily)),
-        wrappingCompartment.reconfigure(wordWrap ? EditorView.lineWrapping : []),
-        preferencesCompartment.reconfigure(editorPreferenceExtensions(preferences)),
+        preferencesCompartment.reconfigure([editorPreferenceExtensions(preferences), wordWrap ? EditorView.lineWrapping : []]),
       ],
     });
     onCursorChangeRef.current?.(cursorInfo(view.state));

@@ -1,10 +1,10 @@
-import { Fragment, lazy, Suspense, useState, useEffect, useRef } from "react";
+import { Fragment, lazy, Suspense, useState, useEffect, useMemo, useRef } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeTextFile, stat } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { scaleShortcut, nextZoom } from './lib/scale-shortcuts';
-import { readNumber, clampPanelHeight, clampSidebarWidth, readEditorPreferences, lineEnding } from './lib/preferences';
+import { readNumber, readBoolean, clampPanelHeight, clampSidebarWidth, readEditorPreferences, lineEnding } from './lib/preferences';
 import type { CursorInfo } from './lib/editor-extensions';
 import StatusBar from './components/StatusBar';
 import { parseRecentProjects, recordProject, type RecentProject } from './lib/recent-projects';
@@ -82,6 +82,7 @@ export default function App() {
   const [tabScrollRatios, setTabScrollRatios] = useState<Record<string, number>>({});
 
   const [themeId, setThemeId] = useState(() => getTheme(readPreference('crumb.theme', 'crumb')).id);
+  const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
   const [codeFontOverride, setCodeFontOverride] = useState(() => {
     const saved = readPreference('crumb.codeFont', '');
     return codeFonts.find(font => font === saved) ?? null;
@@ -92,6 +93,7 @@ export default function App() {
   });
   const [wordWrap, setWordWrap] = useState(() => readPreference('crumb.wordWrap', 'true') !== 'false');
   const [editorPreferences, setEditorPreferences] = useState(() => readEditorPreferences(key => readPreference(key, '')));
+  const [clearPromptOnStart, setClearPromptOnStart] = useState(() => readBoolean(readPreference('crumb.terminalClearPrompt', ''), false));
   const [paneCursors, setPaneCursors] = useState<Record<string, CursorInfo>>({});
 
   // Empty workspace state: start with 0 tabs so Welcome Screen is displayed first
@@ -137,6 +139,7 @@ export default function App() {
   activePaneIdRef.current = activePaneId;
 
   const activeTab = tabs.find(tab => tab.id === activeTabId);
+  const activeLineEnding = useMemo(() => activeTab ? lineEnding(activeTab.content) : '—', [activeTab?.content]);
   const activeCursor = paneCursors[activePaneId] ?? paneCursors[panes.find(pane => pane.kind === 'editor' && pane.tabId === activeTabId)?.id ?? ''];
   const canPreviewMarkdown = activeTab ? isMarkdownPath(activeTab.path) : false;
   const isPreviewOpen = canPreviewMarkdown && panes.some(pane => pane.kind === 'preview' && pane.tabId === activeTab?.id);
@@ -161,6 +164,12 @@ export default function App() {
       for (const [key, value] of Object.entries(editorPreferences)) localStorage.setItem(`crumb.${key}`, String(value));
     } catch { /* Storage may be unavailable. */ }
   }, [editorPreferences]);
+
+  useEffect(() => {
+    try { localStorage.setItem('crumb.terminalClearPrompt', String(clearPromptOnStart)); } catch {}
+  }, [clearPromptOnStart]);
+
+  useEffect(() => { if (!isSettingsOpen) setPreviewThemeId(null); }, [isSettingsOpen]);
 
   const reportCursor = (paneId: string, cursor: CursorInfo) => {
     setPaneCursors(previous => {
@@ -310,7 +319,7 @@ export default function App() {
     if (editorPane) activatePaneTab(editorPane.id, id);
   };
 
-  const theme = getTheme(themeId);
+  const theme = getTheme(previewThemeId ?? themeId);
   const codeFont = codeFontOverride ?? theme.codeFont;
 
   useEffect(() => {
@@ -1095,11 +1104,11 @@ export default function App() {
           display: isPanelOpen ? "block" : "none"
         }}
       >
-        <BottomPanel isOpen={isPanelOpen} onClose={() => setIsPanelOpen(false)} onActiveSessionChange={setActiveTerminalSessionId} theme={theme} fontSize={fontSize} fontFamily={codeFont} focusRequest={terminalFocusRequest} workingDirectory={explorerRootPath} openTerminalRequest={openTerminalRequest} />
+        <BottomPanel isOpen={isPanelOpen} clearPromptOnStart={clearPromptOnStart} onClose={() => setIsPanelOpen(false)} onActiveSessionChange={setActiveTerminalSessionId} theme={theme} fontSize={fontSize} fontFamily={codeFont} focusRequest={terminalFocusRequest} workingDirectory={explorerRootPath} openTerminalRequest={openTerminalRequest} />
       </div>
 
       {/* Command Palette */}
-      <StatusBar cursor={activeCursor} preferences={editorPreferences} lineEnding={activeTab ? lineEnding(activeTab.content) : '—'} language={activeTab ? languageName(activeTab.path) : 'No file'} wordWrap={wordWrap} zoom={zoomLevel} theme={theme.name} />
+      <StatusBar cursor={activeCursor} preferences={editorPreferences} lineEnding={activeLineEnding} language={activeTab ? languageName(activeTab.path) : 'No file'} wordWrap={wordWrap} zoom={zoomLevel} theme={theme.name} />
       {isPaletteOpen && (
         <CommandPalette
           commands={commands}
@@ -1115,6 +1124,9 @@ export default function App() {
       {/* Settings Modal */}
       {isSettingsOpen && (
           <SettingsModal
+            onThemePreview={setPreviewThemeId}
+            clearPromptOnStart={clearPromptOnStart}
+            onClearPromptOnStartChange={setClearPromptOnStart}
             editorPreferences={editorPreferences}
             onEditorPreferencesChange={setEditorPreferences}
             onResetLayout={resetLayout}
