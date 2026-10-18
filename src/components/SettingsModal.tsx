@@ -12,6 +12,7 @@ interface SettingsModalProps {
   wordWrap: boolean;
   onWordWrapChange: (enabled: boolean) => void;
   onClose: () => void;
+  onResetLayout: () => void;
 }
 
 export default function SettingsModal({
@@ -25,6 +26,7 @@ export default function SettingsModal({
   wordWrap,
   onWordWrapChange,
   onClose,
+  onResetLayout,
 }: SettingsModalProps) {
   return (
     <div className="settings-overlay" onMouseDown={onClose}>
@@ -168,6 +170,7 @@ export default function SettingsModal({
         </div>
 
         <div className="settings-footer">
+          <button className="settings-done-btn" onClick={onResetLayout}>Reset layout</button>
           <button className="settings-done-btn" onClick={onClose}>
             Done
           </button>

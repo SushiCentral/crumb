@@ -29,3 +29,11 @@ test('zoom steps are bounded, reversible, and free from floating point drift', (
   assert.equal(nextZoom(2, 1), 2);
   assert.equal(nextZoom(0.5, -1), 0.5);
 });
+
+test('Ctrl+0 resets zoom and Ctrl+Shift+0 resets code font size', () => {
+  assert.deepEqual(scaleShortcut(key('0')), { target: 'zoom', reset: true });
+  assert.deepEqual(scaleShortcut(key(')', true, 'Digit0')), { target: 'font', reset: true });
+  assert.deepEqual(scaleShortcut(key('0', true)), { target: 'font', reset: true });
+  assert.equal(scaleShortcut({ ...key('0'), ctrlKey: false }), null);
+  assert.equal(scaleShortcut({ ...key('0'), altKey: true }), null);
+});

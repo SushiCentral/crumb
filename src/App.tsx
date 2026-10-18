@@ -4,6 +4,7 @@ import { readTextFile, writeTextFile, stat } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { scaleShortcut, nextZoom } from './lib/scale-shortcuts';
+import { readNumber, clampPanelHeight, clampSidebarWidth } from './lib/preferences';
 import { parseRecentProjects, recordProject, type RecentProject } from './lib/recent-projects';
 import Editor, { type EditorHandle } from "./components/Editor";
 import BottomPanel from "./components/BottomPanel";
@@ -65,9 +66,10 @@ const getFileNameFromPath = (path: string | null) => {
 export default function App() {
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [sidebarTab, setSidebarTab] = useState<'explorer' | 'search'>('explorer');
-  const [sidebarWidth, setSidebarWidth] = useState(280);
-  const [panelHeight, setPanelHeight] = useState(() => Math.round(window.innerHeight * 0.4));
+  const [sidebarTab, setSidebarTab] = useState<'explorer' | 'search'>(() => readPreference('crumb.sidebarTab', 'explorer') === 'search' ? 'search' : 'explorer');
+  const [sidebarWidth, setSidebarWidth] = useState(() => clampSidebarWidth(readNumber(readPreference('crumb.sidebarWidth', ''), 280, 160, 10000), window.innerWidth));
+  const [panelHeight, setPanelHeight] = useState(() => clampPanelHeight(readNumber(readPreference('crumb.panelHeight', ''), Math.round(window.innerHeight * 0.4), 0, 10000), window.innerHeight));
+  const [zoomLevel, setZoomLevel] = useState(() => readNumber(readPreference('crumb.zoom', ''), 1, 0.5, 2));
   const [explorerRootPath, setExplorerRootPath] = useState<string | null>(null);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -106,8 +108,9 @@ export default function App() {
   const [terminalFolderError, setTerminalFolderError] = useState<string | null>(null);
 
   const tabsRef = useRef(tabs);
-  const zoomRef = useRef(1);
   const zoomQueueRef = useRef(Promise.resolve());
+  const previousZoomRef = useRef(zoomLevel);
+  const previousFontSizeRef = useRef(fontSize);
   const activeTabIdRef = useRef(activeTabId);
   const panesRef = useRef(panes);
   const activePaneIdRef = useRef(activePaneId);
@@ -146,6 +149,47 @@ export default function App() {
 
   const dismissToast = (id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('crumb.sidebarWidth', String(sidebarWidth));
+      localStorage.setItem('crumb.panelHeight', String(panelHeight));
+      localStorage.setItem('crumb.sidebarTab', sidebarTab);
+    } catch { /* Storage may be unavailable. */ }
+  }, [sidebarWidth, panelHeight, sidebarTab]);
+
+  useEffect(() => {
+    try { localStorage.setItem('crumb.zoom', String(zoomLevel)); } catch {}
+    zoomQueueRef.current = zoomQueueRef.current
+      .then(() => getCurrentWebview().setZoom(zoomLevel))
+      .catch(error => { console.error('Could not scale the interface:', error); });
+    if (previousZoomRef.current !== zoomLevel) addToast(`Zoom ${Math.round(zoomLevel * 100)}%`);
+    previousZoomRef.current = zoomLevel;
+  }, [zoomLevel]);
+
+  useEffect(() => {
+    if (previousFontSizeRef.current !== fontSize) addToast(`Font ${fontSize}px`);
+    previousFontSizeRef.current = fontSize;
+  }, [fontSize]);
+
+  useEffect(() => {
+    const resize = () => {
+      setPanelHeight(value => clampPanelHeight(value, window.innerHeight));
+      setSidebarWidth(value => clampSidebarWidth(value, window.innerWidth));
+    };
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, []);
+
+  const resetLayout = () => {
+    setSidebarWidth(clampSidebarWidth(280, window.innerWidth));
+    setPanelHeight(clampPanelHeight(Math.round(window.innerHeight * 0.4), window.innerHeight));
+    setSidebarTab('explorer');
+    setIsSidebarOpen(true);
+    setIsPanelOpen(true);
+    setPaneWidths({});
+    addToast('Layout reset');
   };
 
   const addRecentProject = (directory: string) => {
@@ -561,13 +605,9 @@ export default function App() {
         e.preventDefault();
         e.stopPropagation();
         if (scaling.target === 'font') {
-          setFontSize(value => Math.min(24, Math.max(10, value + scaling.delta)));
+          setFontSize(value => scaling.reset ? 13 : Math.min(24, Math.max(10, value + scaling.delta)));
         } else {
-          zoomRef.current = nextZoom(zoomRef.current, scaling.delta);
-          const zoom = zoomRef.current;
-          zoomQueueRef.current = zoomQueueRef.current
-            .then(() => getCurrentWebview().setZoom(zoom))
-            .catch(error => { console.error('Could not scale the interface:', error); });
+          setZoomLevel(value => scaling.reset ? 1 : nextZoom(value, scaling.delta));
         }
         return;
       }
@@ -824,7 +864,7 @@ export default function App() {
               if (!sidebarDraggingRef.current) return;
               const left = event.currentTarget.parentElement?.getBoundingClientRect().left ?? 0;
               const available = event.currentTarget.parentElement?.clientWidth ?? window.innerWidth;
-              const newWidth = Math.max(160, Math.min(available - 48 - 220, event.clientX - left - 48));
+              const newWidth = clampSidebarWidth(event.clientX - left - 48, available);
               currentDragWidthRef.current = newWidth;
               if (sidebarContainerRef.current) {
                 sidebarContainerRef.current.style.width = `${newWidth}px`;
@@ -989,7 +1029,7 @@ export default function App() {
             if (!panelDraggingRef.current) return;
             const bottom = event.currentTarget.parentElement?.getBoundingClientRect().bottom ?? window.innerHeight;
             const available = event.currentTarget.parentElement?.clientHeight ?? window.innerHeight;
-            const newHeight = Math.max(120, Math.min(available - 200, bottom - event.clientY));
+              const newHeight = clampPanelHeight(bottom - event.clientY, available);
             currentDragHeightRef.current = newHeight;
             if (panelContainerRef.current) {
               panelContainerRef.current.style.height = `${newHeight}px`;
@@ -1052,7 +1092,8 @@ export default function App() {
 
       {/* Settings Modal */}
       {isSettingsOpen && (
-        <SettingsModal
+          <SettingsModal
+            onResetLayout={resetLayout}
           themes={themes}
           currentThemeId={themeId}
           onThemeChange={setThemeId}
