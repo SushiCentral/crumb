@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { readFile } from '@tauri-apps/plugin-fs';
@@ -60,6 +60,25 @@ export default function MarkdownPreview({ content, path, onOpenFile, onClose, on
   const scrollRef = useRef<HTMLDivElement>(null);
   const isProgrammaticScrollRef = useRef(false);
   const onScrollRatioRef = useRef(onScrollRatio);
+  const onOpenFileRef = useRef(onOpenFile);
+  onOpenFileRef.current = onOpenFile;
+
+  // Scroll synchronization rerenders the pane. Keep parsing and image mounts tied
+  // to document changes, not to every scroll position or inline callback identity.
+  const document = useMemo(() => (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        img: ({ src, alt }) => <PreviewImage src={src} alt={alt} path={path} />,
+        a: ({ href, children }) => <a href={href} onClick={event => {
+          event.preventDefault();
+          if (!href) return;
+          if (/^https?:\/\//i.test(href)) void openUrl(href).catch(console.error);
+          else if (!href.startsWith('#') && !/^[a-z]+:/i.test(href)) onOpenFileRef.current(relativeFilePath(path, href));
+        }}>{children}</a>,
+      }}
+    >{content}</ReactMarkdown>
+  ), [content, path]);
 
   useEffect(() => { onScrollRatioRef.current = onScrollRatio; }, [onScrollRatio]);
 
@@ -94,18 +113,7 @@ export default function MarkdownPreview({ content, path, onOpenFile, onClose, on
     <div className="markdown-preview-header"><span>PREVIEW · {path.split(/[\\/]/).pop()}</span><button aria-label="Close Markdown preview" title="Close preview" onClick={onClose}>×</button></div>
     <div ref={scrollRef} className="markdown-preview-scroll">
       <article className="markdown-body">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            img: ({ src, alt }) => <PreviewImage src={src} alt={alt} path={path} />,
-            a: ({ href, children }) => <a href={href} onClick={event => {
-              event.preventDefault();
-              if (!href) return;
-              if (/^https?:\/\//i.test(href)) void openUrl(href).catch(console.error);
-              else if (!href.startsWith('#') && !/^[a-z]+:/i.test(href)) onOpenFile(relativeFilePath(path, href));
-            }}>{children}</a>,
-          }}
-        >{content}</ReactMarkdown>
+        {document}
       </article>
     </div>
   </section>;
