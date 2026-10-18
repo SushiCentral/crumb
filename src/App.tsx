@@ -709,17 +709,7 @@ export default function App() {
 
       <div style={{ flex: 1, minHeight: 0, display: "flex", overflow: "hidden" }}>
         {/* Activity Bar */}
-        <div style={{
-          width: "48px",
-          minWidth: "48px",
-          backgroundColor: "var(--activity)",
-          borderRight: "1px solid var(--border)",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          paddingTop: "8px",
-          gap: "6px"
-        }}>
+        <div className="activity-bar">
           {/* Explorer Button */}
           <button
             onClick={() => {
@@ -734,22 +724,7 @@ export default function App() {
             }}
             title="Explorer (⌘B)"
             aria-label="Toggle file explorer"
-            style={{
-              width: "36px",
-              height: "36px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "none",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-              borderLeft: isSidebarOpen && sidebarTab === 'explorer' ? "2px solid var(--accent)" : "2px solid transparent",
-              opacity: isSidebarOpen && sidebarTab === 'explorer' ? 1 : 0.5,
-              transition: "all 0.15s ease",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--hover)"; e.currentTarget.style.opacity = "1"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.opacity = isSidebarOpen && sidebarTab === 'explorer' ? "1" : "0.5"; }}
+            className={`activity-btn ${isSidebarOpen && sidebarTab === 'explorer' ? 'active' : ''}`}
           >
             <FolderIcon width={20} height={20} />
           </button>
@@ -768,48 +743,19 @@ export default function App() {
             }}
             title="Search in Files (⌘Shift+F)"
             aria-label="Toggle search in files"
-            style={{
-              width: "36px",
-              height: "36px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "none",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-              borderLeft: isSidebarOpen && sidebarTab === 'search' ? "2px solid var(--accent)" : "2px solid transparent",
-              opacity: isSidebarOpen && sidebarTab === 'search' ? 1 : 0.5,
-              transition: "all 0.15s ease",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--hover)"; e.currentTarget.style.opacity = "1"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.opacity = isSidebarOpen && sidebarTab === 'search' ? "1" : "0.5"; }}
+            className={`activity-btn ${isSidebarOpen && sidebarTab === 'search' ? 'active' : ''}`}
           >
             <SearchIcon width={19} height={19} />
           </button>
 
-          <div style={{ flex: 1 }} />
+          <div className="activity-bar-spacer" />
 
           {/* Settings Button */}
           <button
             onClick={() => setIsSettingsOpen(true)}
             title="Editor Settings (⌘,)"
             aria-label="Open settings"
-            style={{
-              width: "36px",
-              height: "36px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "none",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-              opacity: 0.6,
-              transition: "all 0.15s ease",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--hover)"; e.currentTarget.style.opacity = "1"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.opacity = "0.6"; }}
+            className="activity-btn activity-btn-settings"
           >
             <SettingsIcon width={19} height={19} />
           </button>
@@ -819,7 +765,7 @@ export default function App() {
             onClick={() => setIsPaletteOpen(true)}
             title="Commands and themes (Ctrl/Cmd+Shift+P)"
             aria-label="Open command palette"
-            style={{ width: '36px', height: '36px', marginBottom: '8px', border: 'none', borderRadius: '6px', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: '19px' }}
+            className="activity-btn activity-btn-palette"
           >
             ›
           </button>

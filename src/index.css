@@ -109,6 +109,14 @@ body,
 .file-dialog-actions button { border: 1px solid var(--border); border-radius: 4px; padding: 6px 11px; background: var(--surface); color: var(--text); cursor: pointer; }
 .file-dialog-actions button.primary { background: var(--button); color: var(--accent-text); border-color: var(--button); }
 .file-explorer { height: 100%; display: flex; flex-direction: column; container-type: inline-size; color: var(--text); font: 13px var(--ui-font); }
+.activity-bar { width: 48px; min-width: 48px; background: var(--activity); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding-top: 8px; gap: 6px; }
+.activity-btn { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: transparent; border: none; border-radius: 6px; cursor: pointer; border-left: 2px solid transparent; opacity: .5; transition: all .15s ease; }
+.activity-btn.active { border-left-color: var(--accent); opacity: 1; }
+.activity-btn-settings { border-left: 0; opacity: .6; }
+.activity-btn:hover { background: var(--hover); opacity: 1; }
+.activity-bar-spacer { flex: 1; }
+.activity-btn-palette { display: inline-block; margin-bottom: 8px; border-left: 0; color: var(--muted); font-size: 19px; opacity: 1; transition: none; }
+.activity-btn-palette:hover { background: transparent; }
 .explorer-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 6px 12px; border-bottom: 1px solid var(--border); }
 .explorer-header strong { font-size: 12px; font-weight: 600; color: var(--text); }
 .explorer-actions { display: flex; align-items: center; gap: 2px; }
