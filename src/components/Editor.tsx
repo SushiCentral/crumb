@@ -7,6 +7,7 @@ import { languageForPath } from '../lib/languages';
 import type { Theme } from '../lib/themes';
 import type { EditorPreferences } from '../lib/preferences';
 import { editorCoreExtensions, editorPreferenceExtensions, cursorInfo, type CursorInfo } from '../lib/editor-extensions';
+import { attachScrollSync } from '../lib/scroll-sync';
 
 interface EditorProps {
   tabId: string;
@@ -21,13 +22,10 @@ interface EditorProps {
   onCursorChange?: (cursor: CursorInfo) => void;
   onChange?: (value: string) => void;
   onFocus?: () => void;
-  onScrollRatio?: (ratio: number) => void;
-  syncScrollRatio?: number;
 }
 
 export interface EditorHandle {
   focus: () => void;
-  setScrollRatio: (ratio: number) => void;
   jumpToLine: (line: number) => void;
 }
 
@@ -64,7 +62,7 @@ function editorAppearance(theme: Theme, fontSize: number, fontFamily: string) {
   }, { dark: theme.dark });
 }
 
-const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, preferences, onChange, onCursorChange, onFocus, onScrollRatio, syncScrollRatio }, ref) {
+const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, preferences, onChange, onCursorChange, onFocus }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const statesRef = useRef(new Map<string, EditorState>());
@@ -72,24 +70,9 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, pa
   const onChangeRef = useRef(onChange);
   const onCursorChangeRef = useRef(onCursorChange);
   onCursorChangeRef.current = onCursorChange;
-  const onScrollRatioRef = useRef(onScrollRatio);
-  const isProgrammaticScrollRef = useRef(false);
 
   useImperativeHandle(ref, () => ({
     focus: () => viewRef.current?.focus(),
-    setScrollRatio: (ratio: number) => {
-      const scrollDOM = viewRef.current?.scrollDOM;
-      if (scrollDOM) {
-        const max = scrollDOM.scrollHeight - scrollDOM.clientHeight;
-        if (max > 0) {
-          isProgrammaticScrollRef.current = true;
-          scrollDOM.scrollTop = ratio * max;
-          requestAnimationFrame(() => {
-            isProgrammaticScrollRef.current = false;
-          });
-        }
-      }
-    },
     jumpToLine: (line: number) => {
       const view = viewRef.current;
       if (!view) return;
@@ -105,22 +88,6 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, pa
   }), []);
 
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
-  useEffect(() => { onScrollRatioRef.current = onScrollRatio; }, [onScrollRatio]);
-
-  useEffect(() => {
-    if (syncScrollRatio == null || !viewRef.current) return;
-    const scrollDOM = viewRef.current.scrollDOM;
-    const max = scrollDOM.scrollHeight - scrollDOM.clientHeight;
-    if (max <= 0) return;
-    const currentRatio = scrollDOM.scrollTop / max;
-    if (Math.abs(currentRatio - syncScrollRatio) > 0.005) {
-      isProgrammaticScrollRef.current = true;
-      scrollDOM.scrollTop = syncScrollRatio * max;
-      requestAnimationFrame(() => {
-        isProgrammaticScrollRef.current = false;
-      });
-    }
-  }, [syncScrollRatio]);
 
   const createState = (content: string, currentTheme: Theme, currentFontSize: number) => EditorState.create({
     doc: content,
@@ -148,20 +115,19 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, pa
     statesRef.current.set(tabId, state);
     onCursorChangeRef.current?.(cursorInfo(state));
 
-    const scrollDOM = view.scrollDOM;
-    const handleScroll = () => {
-      if (isProgrammaticScrollRef.current) return;
-      const max = scrollDOM.scrollHeight - scrollDOM.clientHeight;
-      if (max > 0) onScrollRatioRef.current?.(scrollDOM.scrollTop / max);
-    };
-    scrollDOM.addEventListener('scroll', handleScroll, { passive: true });
-
     return () => {
-      scrollDOM.removeEventListener('scroll', handleScroll);
       viewRef.current = null;
       view.destroy();
     };
   }, []);
+
+  // Peer panes exchange ratios through the scroll-sync bus. Declared after the
+  // mount effect so viewRef is populated; re-attaches when the tab changes.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    return attachScrollSync(view.scrollDOM, tabId);
+  }, [tabId]);
 
   useEffect(() => {
     const view = viewRef.current;

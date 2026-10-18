@@ -78,9 +78,6 @@ export default function App() {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>(() => parseRecentProjects(readPreference('crumb.recentProjects', '[]')));
 
-  // Tab-specific scroll synchronization (binds preview and editor showing the same tab)
-  const [tabScrollRatios, setTabScrollRatios] = useState<Record<string, number>>({});
-
   const [themeId, setThemeId] = useState(() => getTheme(readPreference('crumb.theme', 'crumb')).id);
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
   const [codeFontOverride, setCodeFontOverride] = useState(() => {
@@ -230,13 +227,6 @@ export default function App() {
 
   const clearRecentProjects = () => {
     setRecentProjects([]);
-  };
-
-  const updateTabScrollRatio = (tabId: string, ratio: number) => {
-    setTabScrollRatios(prev => {
-      if (Math.abs((prev[tabId] ?? -1) - ratio) < 0.005) return prev;
-      return { ...prev, [tabId]: ratio };
-    });
   };
 
   const updatePanes = (update: (current: EditorPane[]) => EditorPane[]) => {
@@ -990,11 +980,10 @@ export default function App() {
                         <MarkdownPreview
                           content={file.content}
                           path={file.path}
+                          tabId={file.id}
                           onOpenFile={path => { void handleOpenFile(path); }}
                           onClose={() => closePane(pane.id)}
                           onActivate={() => selectPane(pane.id)}
-                          syncScrollRatio={tabScrollRatios[file.id]}
-                          onScrollRatio={ratio => updateTabScrollRatio(file.id, ratio)}
                         />
                       </Suspense>
                     ) : <>
@@ -1026,8 +1015,6 @@ export default function App() {
                           onCursorChange={cursor => reportCursor(pane.id, cursor)}
                           onChange={value => handleEditorChange(file.id, value)}
                           onFocus={() => selectPane(pane.id)}
-                          onScrollRatio={ratio => updateTabScrollRatio(file.id, ratio)}
-                          syncScrollRatio={tabScrollRatios[file.id]}
                         />
                       </div>
                     </>}
