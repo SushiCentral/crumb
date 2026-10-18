@@ -1,5 +1,6 @@
 import { codeFonts, type Theme } from '../lib/themes';
 import { CloseIcon } from './Icons';
+import type { EditorPreferences } from '../lib/preferences';
 
 interface SettingsModalProps {
   themes: Theme[];
@@ -13,6 +14,8 @@ interface SettingsModalProps {
   onWordWrapChange: (enabled: boolean) => void;
   onClose: () => void;
   onResetLayout: () => void;
+  editorPreferences: EditorPreferences;
+  onEditorPreferencesChange: (preferences: EditorPreferences) => void;
 }
 
 export default function SettingsModal({
@@ -27,6 +30,8 @@ export default function SettingsModal({
   onWordWrapChange,
   onClose,
   onResetLayout,
+  editorPreferences,
+  onEditorPreferencesChange,
 }: SettingsModalProps) {
   return (
     <div className="settings-overlay" onMouseDown={onClose}>
@@ -148,6 +153,26 @@ export default function SettingsModal({
           <section className="settings-section">
             <h3 className="settings-section-title">Editor Behavior</h3>
             <p className="settings-section-desc">Code editing experience and view formatting</p>
+
+            {([
+              ['lineNumbers', 'Line numbers'], ['bracketMatching', 'Bracket matching'],
+              ['autoCloseBrackets', 'Auto-close brackets'], ['highlightActiveLine', 'Highlight active line'],
+            ] as const).map(([key, label]) => <div className="settings-row" key={key}>
+              <label htmlFor={`editor-${key}`}>{label}</label>
+              <button id={`editor-${key}`} className={`toggle-switch ${editorPreferences[key] ? 'checked' : ''}`} role="switch" aria-checked={editorPreferences[key]} onClick={() => onEditorPreferencesChange({ ...editorPreferences, [key]: !editorPreferences[key] })}><span className="toggle-slider" /></button>
+            </div>)}
+            <div className="settings-row">
+              <label htmlFor="indent-size">Indent size</label>
+              <select id="indent-size" className="settings-select" value={editorPreferences.indentSize} onChange={event => onEditorPreferencesChange({ ...editorPreferences, indentSize: Number(event.target.value) as 2 | 3 | 4 })}>
+                {[2, 3, 4].map(size => <option key={size} value={size}>{size}</option>)}
+              </select>
+            </div>
+            <div className="settings-row">
+              <label htmlFor="indent-with">Indent with</label>
+              <select id="indent-with" className="settings-select" value={editorPreferences.indentWith} onChange={event => onEditorPreferencesChange({ ...editorPreferences, indentWith: event.target.value as 'spaces' | 'tabs' })}>
+                <option value="spaces">Spaces</option><option value="tabs">Tabs</option>
+              </select>
+            </div>
 
             <div className="settings-row">
               <div className="settings-row-label">

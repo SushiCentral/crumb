@@ -1,10 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
-import { EditorView, basicSetup } from 'codemirror';
+import { EditorView } from '@codemirror/view';
 import { Annotation, Compartment, EditorState, Prec, Transaction } from '@codemirror/state';
 import { javascript } from '@codemirror/lang-javascript';
 import { createSyntaxHighlighting } from '../lib/highlight';
 import { languageForPath } from '../lib/languages';
 import type { Theme } from '../lib/themes';
+import type { EditorPreferences } from '../lib/preferences';
+import { editorCoreExtensions, editorPreferenceExtensions, cursorInfo, type CursorInfo } from '../lib/editor-extensions';
 
 interface EditorProps {
   tabId: string;
@@ -15,6 +17,8 @@ interface EditorProps {
   fontSize: number;
   fontFamily: string;
   wordWrap: boolean;
+  preferences: EditorPreferences;
+  onCursorChange?: (cursor: CursorInfo) => void;
   onChange?: (value: string) => void;
   onFocus?: () => void;
   onScrollRatio?: (ratio: number) => void;
@@ -32,6 +36,7 @@ const syntaxCompartment = new Compartment();
 const languageCompartment = new Compartment();
 const appearanceCompartment = new Compartment();
 const wrappingCompartment = new Compartment();
+const preferencesCompartment = new Compartment();
 
 function editorAppearance(theme: Theme, fontSize: number, fontFamily: string) {
   return EditorView.theme({
@@ -54,18 +59,20 @@ function editorAppearance(theme: Theme, fontSize: number, fontFamily: string) {
     },
     '.cm-cursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
     '&.cm-focused': { outline: 'none' },
-    '.cm-matchingBracket': { backgroundColor: 'var(--surface)', outline: 'none' },
+    '.cm-matchingBracket': { backgroundColor: 'var(--selection)', outline: 'none' },
     '.cm-scroller::-webkit-scrollbar': { width: '7px', height: '7px' },
     '.cm-scroller::-webkit-scrollbar-thumb': { background: 'var(--surface)', borderRadius: '4px' },
   }, { dark: theme.dark });
 }
 
-const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, onChange, onFocus, onScrollRatio, syncScrollRatio }, ref) {
+const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, preferences, onChange, onCursorChange, onFocus, onScrollRatio, syncScrollRatio }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const statesRef = useRef(new Map<string, EditorState>());
   const activeTabRef = useRef(tabId);
   const onChangeRef = useRef(onChange);
+  const onCursorChangeRef = useRef(onCursorChange);
+  onCursorChangeRef.current = onCursorChange;
   const onScrollRatioRef = useRef(onScrollRatio);
   const isProgrammaticScrollRef = useRef(false);
 
@@ -120,11 +127,13 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, pa
     doc: content,
     extensions: [
       syntaxCompartment.of(Prec.highest(createSyntaxHighlighting(currentTheme))),
-      basicSetup,
+      editorCoreExtensions,
+      preferencesCompartment.of(editorPreferenceExtensions(preferences)),
       languageCompartment.of([]),
       appearanceCompartment.of(editorAppearance(currentTheme, currentFontSize, fontFamily)),
       wrappingCompartment.of(wordWrap ? EditorView.lineWrapping : []),
       EditorView.updateListener.of(update => {
+        if (update.docChanged || update.selectionSet) onCursorChangeRef.current?.(cursorInfo(update.state));
         if (!update.docChanged) return;
         statesRef.current.set(activeTabRef.current, update.state);
         const external = update.transactions.some(transaction => transaction.annotation(externalDocUpdate));
@@ -139,6 +148,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, pa
     const view = new EditorView({ state, parent: containerRef.current });
     viewRef.current = view;
     statesRef.current.set(tabId, state);
+    onCursorChangeRef.current?.(cursorInfo(state));
 
     const scrollDOM = view.scrollDOM;
     const handleScroll = () => {
@@ -168,9 +178,11 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ tabId, pa
         syntaxCompartment.reconfigure(Prec.highest(createSyntaxHighlighting(theme))),
         appearanceCompartment.reconfigure(editorAppearance(theme, fontSize, fontFamily)),
         wrappingCompartment.reconfigure(wordWrap ? EditorView.lineWrapping : []),
+        preferencesCompartment.reconfigure(editorPreferenceExtensions(preferences)),
       ],
     });
-  }, [tabId, theme, fontSize, fontFamily, wordWrap]);
+    onCursorChangeRef.current?.(cursorInfo(view.state));
+  }, [tabId, theme, fontSize, fontFamily, wordWrap, preferences]);
 
   useEffect(() => {
     const view = viewRef.current;

@@ -117,6 +117,9 @@ body,
 .activity-bar-spacer { flex: 1; }
 .activity-btn-palette { display: inline-block; margin-bottom: 8px; border-left: 0; color: var(--muted); font-size: 19px; opacity: 1; transition: none; }
 .activity-btn-palette:hover { background: transparent; }
+.status-bar { flex: none; min-height: 26px; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 3px 12px; border-top: 1px solid var(--border); background: var(--activity); color: var(--muted); font: 11px var(--ui-font); overflow-x: auto; white-space: nowrap; }
+.status-bar-group { display: flex; align-items: center; gap: 14px; flex: none; }
+.status-bar-right { margin-left: auto; }
 .explorer-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 6px 12px; border-bottom: 1px solid var(--border); }
 .explorer-header strong { font-size: 12px; font-weight: 600; color: var(--text); }
 .explorer-actions { display: flex; align-items: center; gap: 2px; }

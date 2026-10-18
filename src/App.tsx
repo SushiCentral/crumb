@@ -4,7 +4,9 @@ import { readTextFile, writeTextFile, stat } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { scaleShortcut, nextZoom } from './lib/scale-shortcuts';
-import { readNumber, clampPanelHeight, clampSidebarWidth } from './lib/preferences';
+import { readNumber, clampPanelHeight, clampSidebarWidth, readEditorPreferences, lineEnding } from './lib/preferences';
+import type { CursorInfo } from './lib/editor-extensions';
+import StatusBar from './components/StatusBar';
 import { parseRecentProjects, recordProject, type RecentProject } from './lib/recent-projects';
 import Editor, { type EditorHandle } from "./components/Editor";
 import BottomPanel from "./components/BottomPanel";
@@ -89,6 +91,8 @@ export default function App() {
     return Number.isFinite(value) ? Math.min(24, Math.max(10, value)) : 13;
   });
   const [wordWrap, setWordWrap] = useState(() => readPreference('crumb.wordWrap', 'true') !== 'false');
+  const [editorPreferences, setEditorPreferences] = useState(() => readEditorPreferences(key => readPreference(key, '')));
+  const [paneCursors, setPaneCursors] = useState<Record<string, CursorInfo>>({});
 
   // Empty workspace state: start with 0 tabs so Welcome Screen is displayed first
   const [tabs, setTabs] = useState<EditorTab[]>([]);
@@ -133,6 +137,7 @@ export default function App() {
   activePaneIdRef.current = activePaneId;
 
   const activeTab = tabs.find(tab => tab.id === activeTabId);
+  const activeCursor = paneCursors[activePaneId] ?? paneCursors[panes.find(pane => pane.kind === 'editor' && pane.tabId === activeTabId)?.id ?? ''];
   const canPreviewMarkdown = activeTab ? isMarkdownPath(activeTab.path) : false;
   const isPreviewOpen = canPreviewMarkdown && panes.some(pane => pane.kind === 'preview' && pane.tabId === activeTab?.id);
 
@@ -149,6 +154,20 @@ export default function App() {
 
   const dismissToast = (id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
+  useEffect(() => {
+    try {
+      for (const [key, value] of Object.entries(editorPreferences)) localStorage.setItem(`crumb.${key}`, String(value));
+    } catch { /* Storage may be unavailable. */ }
+  }, [editorPreferences]);
+
+  const reportCursor = (paneId: string, cursor: CursorInfo) => {
+    setPaneCursors(previous => {
+      const old = previous[paneId];
+      return old?.line === cursor.line && old.column === cursor.column && old.selected === cursor.selected
+        ? previous : { ...previous, [paneId]: cursor };
+    });
   };
 
   useEffect(() => {
@@ -994,6 +1013,8 @@ export default function App() {
                           fontSize={fontSize}
                           fontFamily={codeFont}
                           wordWrap={wordWrap}
+                          preferences={editorPreferences}
+                          onCursorChange={cursor => reportCursor(pane.id, cursor)}
                           onChange={value => handleEditorChange(file.id, value)}
                           onFocus={() => selectPane(pane.id)}
                           onScrollRatio={ratio => updateTabScrollRatio(file.id, ratio)}
@@ -1078,6 +1099,7 @@ export default function App() {
       </div>
 
       {/* Command Palette */}
+      <StatusBar cursor={activeCursor} preferences={editorPreferences} lineEnding={activeTab ? lineEnding(activeTab.content) : '—'} language={activeTab ? languageName(activeTab.path) : 'No file'} wordWrap={wordWrap} zoom={zoomLevel} theme={theme.name} />
       {isPaletteOpen && (
         <CommandPalette
           commands={commands}
@@ -1093,6 +1115,8 @@ export default function App() {
       {/* Settings Modal */}
       {isSettingsOpen && (
           <SettingsModal
+            editorPreferences={editorPreferences}
+            onEditorPreferencesChange={setEditorPreferences}
             onResetLayout={resetLayout}
           themes={themes}
           currentThemeId={themeId}
