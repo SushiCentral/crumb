@@ -51,6 +51,8 @@ npm run tauri:dev
 
 ## Keyboard Shortcuts
 
+- `Ctrl/Cmd + =` / `-` — Zoom the whole interface in / out (50–200%)
+- `Ctrl/Cmd + Shift + =` / `-` — Increase / decrease editor and terminal font size
 - `Ctrl/Cmd + O` — Open a file
 - `Ctrl/Cmd + P` — Search filenames in the open folder and open tabs
 - `Ctrl/Cmd + S` — Save file

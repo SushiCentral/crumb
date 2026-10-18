@@ -1,10 +1,5 @@
 import { FileIcon, FolderIcon, KeyboardIcon, NewFileIcon, SearchIcon, SettingsIcon, TerminalIcon } from './Icons';
-
-interface RecentItem {
-  path: string;
-  name: string;
-  lastOpened: number;
-}
+import type { RecentProject } from '../lib/recent-projects';
 
 interface WelcomeScreenProps {
   onNewFile: () => void;
@@ -14,8 +9,9 @@ interface WelcomeScreenProps {
   onOpenPalette: () => void;
   onOpenSettings: () => void;
   onToggleTerminal: () => void;
-  recentFiles: RecentItem[];
-  onClearRecentFiles: () => void;
+  recentProjects: RecentProject[];
+  onOpenProject: (path: string) => void;
+  onClearRecentProjects: () => void;
 }
 
 export default function WelcomeScreen({
@@ -26,8 +22,9 @@ export default function WelcomeScreen({
   onOpenPalette,
   onOpenSettings,
   onToggleTerminal,
-  recentFiles,
-  onClearRecentFiles,
+  recentProjects,
+  onOpenProject,
+  onClearRecentProjects,
 }: WelcomeScreenProps) {
   const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
   const modKey = isMac ? '⌘' : 'Ctrl+';
@@ -36,19 +33,43 @@ export default function WelcomeScreen({
     <div className="welcome-screen">
       <div className="welcome-container">
         <header className="welcome-header">
-          <div className="welcome-badge">
-            <FolderIcon width={28} height={28} />
-          </div>
           <h1 className="welcome-title">Crumb</h1>
-          <p className="welcome-subtitle">A fast, lightweight desktop code editor</p>
+          <p className="welcome-subtitle">Pick up where you left off.</p>
         </header>
 
         <div className="welcome-grid">
+          <section className="welcome-card welcome-projects" aria-label="Recent projects">
+            <div className="welcome-card-header">
+              <h2 className="welcome-card-title">Recent projects</h2>
+              {recentProjects.length > 0 && <button className="welcome-clear-btn" onClick={onClearRecentProjects} title="Clear recent projects">Clear</button>}
+            </div>
+            {recentProjects.length === 0 ? (
+              <div className="welcome-empty-recent">
+                <FolderIcon width={28} height={28} />
+                <p>No recent projects yet</p>
+                <small>Open a folder to start a project. It will appear here next time.</small>
+                <button className="welcome-open-project" onClick={onOpenFolder}>Open Folder…</button>
+              </div>
+            ) : (
+              <div className="welcome-recent-list">
+                {recentProjects.map(item => (
+                  <button key={item.path} className="welcome-recent-item" onClick={() => onOpenProject(item.path)} title={item.path}>
+                    <FolderIcon width={20} height={20} className="recent-icon" />
+                    <span className="recent-project-details"><span className="recent-name">{item.name}</span><span className="recent-path">{item.path}</span></span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
           {/* Start Actions */}
           <section className="welcome-card">
             <h2 className="welcome-card-title">Start</h2>
             <div className="welcome-action-list">
-              <button className="welcome-action-btn primary-action" onClick={onNewFile}>
+              <button className="welcome-action-btn primary-action" onClick={onOpenFolder}>
+                <span className="welcome-btn-icon"><FolderIcon width={18} height={18} /></span>
+                <span className="welcome-btn-label">Open Folder…</span>
+              </button>
+              <button className="welcome-action-btn" onClick={onNewFile}>
                 <span className="welcome-btn-icon"><NewFileIcon width={18} height={18} /></span>
                 <span className="welcome-btn-label">New File</span>
                 <kbd className="welcome-shortcut">{modKey}N</kbd>
@@ -58,11 +79,6 @@ export default function WelcomeScreen({
                 <span className="welcome-btn-icon"><FileIcon width={18} height={18} /></span>
                 <span className="welcome-btn-label">Open File…</span>
                 <kbd className="welcome-shortcut">{modKey}O</kbd>
-              </button>
-
-              <button className="welcome-action-btn" onClick={onOpenFolder}>
-                <span className="welcome-btn-icon"><FolderIcon width={18} height={18} /></span>
-                <span className="welcome-btn-label">Open Folder / Project…</span>
               </button>
 
               <button className="welcome-action-btn" onClick={onOpenSearch}>
@@ -90,39 +106,6 @@ export default function WelcomeScreen({
             </div>
           </section>
 
-          {/* Recent Files */}
-          <section className="welcome-card">
-            <div className="welcome-card-header">
-              <h2 className="welcome-card-title">Recent Files</h2>
-              {recentFiles.length > 0 && (
-                <button className="welcome-clear-btn" onClick={onClearRecentFiles} title="Clear recent files">
-                  Clear
-                </button>
-              )}
-            </div>
-
-            {recentFiles.length === 0 ? (
-              <div className="welcome-empty-recent">
-                <p>No recent files opened yet</p>
-                <small>Opened files will appear here for fast access</small>
-              </div>
-            ) : (
-              <div className="welcome-recent-list">
-                {recentFiles.slice(0, 7).map((item) => (
-                  <button
-                    key={item.path}
-                    className="welcome-recent-item"
-                    onClick={() => onOpenFile(item.path)}
-                    title={item.path}
-                  >
-                    <FileIcon width={15} height={15} className="recent-icon" />
-                    <span className="recent-name">{item.name}</span>
-                    <span className="recent-path">{item.path}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
         </div>
 
         {/* Shortcuts Footer */}

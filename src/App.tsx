@@ -1,7 +1,10 @@
 import { Fragment, lazy, Suspense, useState, useEffect, useRef } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { readTextFile, writeTextFile, stat } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { scaleShortcut, nextZoom } from './lib/scale-shortcuts';
+import { parseRecentProjects, recordProject, type RecentProject } from './lib/recent-projects';
 import Editor, { type EditorHandle } from "./components/Editor";
 import BottomPanel from "./components/BottomPanel";
 import FileExplorer from "./components/FileExplorer";
@@ -34,12 +37,6 @@ interface EditorPane {
   kind: 'editor' | 'preview';
 }
 
-interface RecentItem {
-  path: string;
-  name: string;
-  lastOpened: number;
-}
-
 interface PendingCloseItem {
   tabId: string;
   paneId: string;
@@ -59,15 +56,6 @@ const readPreference = (key: string, fallback: string) => {
   try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
 };
 
-const readRecentFiles = (): RecentItem[] => {
-  try {
-    const raw = localStorage.getItem('crumb.recentFiles');
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-};
-
 const getFileNameFromPath = (path: string | null) => {
   if (!path) return "Untitled";
   const segments = path.split(/[\\/]/).filter(Boolean);
@@ -84,7 +72,7 @@ export default function App() {
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const [recentFiles, setRecentFiles] = useState<RecentItem[]>(readRecentFiles);
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>(() => parseRecentProjects(readPreference('crumb.recentProjects', '[]')));
 
   // Tab-specific scroll synchronization (binds preview and editor showing the same tab)
   const [tabScrollRatios, setTabScrollRatios] = useState<Record<string, number>>({});
@@ -118,6 +106,8 @@ export default function App() {
   const [terminalFolderError, setTerminalFolderError] = useState<string | null>(null);
 
   const tabsRef = useRef(tabs);
+  const zoomRef = useRef(1);
+  const zoomQueueRef = useRef(Promise.resolve());
   const activeTabIdRef = useRef(activeTabId);
   const panesRef = useRef(panes);
   const activePaneIdRef = useRef(activePaneId);
@@ -158,18 +148,16 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
-  const addRecentFile = (filePath: string) => {
-    const name = getFileNameFromPath(filePath);
-    setRecentFiles(prev => {
-      const updated = [{ path: filePath, name, lastOpened: Date.now() }, ...prev.filter(item => item.path !== filePath)].slice(0, 15);
-      try { localStorage.setItem('crumb.recentFiles', JSON.stringify(updated)); } catch {}
-      return updated;
-    });
+  const addRecentProject = (directory: string) => {
+    setRecentProjects(previous => recordProject(previous, directory));
   };
 
-  const clearRecentFiles = () => {
-    setRecentFiles([]);
-    try { localStorage.removeItem('crumb.recentFiles'); } catch {}
+  useEffect(() => {
+    try { localStorage.setItem('crumb.recentProjects', JSON.stringify(recentProjects)); } catch {}
+  }, [recentProjects]);
+
+  const clearRecentProjects = () => {
+    setRecentProjects([]);
   };
 
   const updateTabScrollRatio = (tabId: string, ratio: number) => {
@@ -283,6 +271,7 @@ export default function App() {
     try {
       const path = await invoke<string>("get_pty_cwd", { id: activeTerminalSessionId });
       setExplorerRootPath(path);
+      addRecentProject(path);
       setIsSidebarOpen(true);
       setSidebarTab('explorer');
       setTerminalFolderError(null);
@@ -294,9 +283,21 @@ export default function App() {
 
   const handleFolderOpened = (path: string) => {
     setExplorerRootPath(path);
+    addRecentProject(path);
     setOpenTerminalRequest(previous => ({ path, sequence: (previous?.sequence ?? 0) + 1 }));
     setIsPanelOpen(true);
     setTerminalFocusRequest(value => value + 1);
+  };
+
+  const handleOpenRecentProject = async (path: string) => {
+    try {
+      if (!(await stat(path)).isDirectory) throw new Error('This directory is no longer available.');
+      handleFolderOpened(path);
+      setIsSidebarOpen(true);
+      setSidebarTab('explorer');
+    } catch (error) {
+      addToast(`Could not open project: ${String(error)}`, 'error');
+    }
   };
 
   const handleChooseFolder = async () => {
@@ -363,8 +364,6 @@ export default function App() {
         }
       }
 
-      addRecentFile(selectedPath);
-
       if (lineNumber != null) {
         setTimeout(() => {
           const pane = panesRef.current.find(p => p.id === targetPaneId && p.kind === 'editor') ?? panesRef.current.find(p => p.tabId === targetTabId && p.kind === 'editor');
@@ -407,7 +406,6 @@ export default function App() {
       const contentToSave = tab.content;
       await writeTextFile(targetPath, contentToSave);
       updateTabs(current => current.map(item => item.id === id ? { ...item, path: targetPath, savedContent: contentToSave } : item));
-      addRecentFile(targetPath);
       addToast(`Saved ${getFileNameFromPath(targetPath)}`, 'success');
       return true;
     } catch (error) {
@@ -558,6 +556,21 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const scaling = scaleShortcut(e);
+      if (scaling) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (scaling.target === 'font') {
+          setFontSize(value => Math.min(24, Math.max(10, value + scaling.delta)));
+        } else {
+          zoomRef.current = nextZoom(zoomRef.current, scaling.delta);
+          const zoom = zoomRef.current;
+          zoomQueueRef.current = zoomQueueRef.current
+            .then(() => getCurrentWebview().setZoom(zoom))
+            .catch(error => { console.error('Could not scale the interface:', error); });
+        }
+        return;
+      }
       if (currentPendingCloseId) return;
       if (isCloseAllConfirmationOpen) {
         if (e.key === 'Escape') {
@@ -912,8 +925,9 @@ export default function App() {
               onOpenPalette={() => setIsPaletteOpen(true)}
               onOpenSettings={() => setIsSettingsOpen(true)}
               onToggleTerminal={() => setIsPanelOpen(v => !v)}
-              recentFiles={recentFiles}
-              onClearRecentFiles={clearRecentFiles}
+              recentProjects={recentProjects}
+              onOpenProject={path => { void handleOpenRecentProject(path); }}
+              onClearRecentProjects={clearRecentProjects}
             />
           ) : (
             <div ref={workspaceRef} className="editor-workspace" style={{ flex: 1 }}>
