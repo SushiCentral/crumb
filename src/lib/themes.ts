@@ -181,6 +181,38 @@ export const themes: Theme[] = [
       type: '#986600', property: '#c12a35', tag: '#c12a35', attribute: '#b14c17',
     },
   },
+  {
+    id: 'github-dark', name: 'GitHub Dark', dark: true,
+    uiFont: 'Inter', codeFont: 'JetBrains Mono',
+    colors: {
+      activity: '#010409', sidebar: '#161b22', editor: '#0d1117', panel: '#0d1117',
+      panelHeader: '#161b22', terminal: '#010409', terminalSidebar: '#161b22', surface: '#21262d',
+      border: '#30363d', text: '#e6edf3', muted: '#b1bac4', subtle: '#8b949e',
+      accent: '#2f81f7', accentText: '#ffffff', hover: '#21262d', selection: '#264f78',
+      gutter: '#8b949e', activeLine: '#161b22', warning: '#d29922', button: '#2f81f7',
+    },
+    syntax: {
+      keyword: '#ff7b72', function: '#d2a8ff', variable: '#e6edf3', string: '#a5d6ff',
+      number: '#79c0ff', comment: '#8b949e', operator: '#ff7b72', punctuation: '#c9d1d9',
+      type: '#ffa657', property: '#79c0ff', tag: '#7ee787', attribute: '#d2a8ff',
+    },
+  },
+  {
+    id: 'matte-black', name: 'Matte Black', dark: true,
+    uiFont: 'Inter', codeFont: 'JetBrains Mono',
+    colors: {
+      activity: '#050607', sidebar: '#0d0f11', editor: '#08090b', panel: '#0b0d0f',
+      panelHeader: '#111417', terminal: '#050607', terminalSidebar: '#0d0f11', surface: '#1c2024',
+      border: '#292e33', text: '#e4e7eb', muted: '#b0b7bf', subtle: '#858e98',
+      accent: '#86b6ff', accentText: '#07111f', hover: '#191d21', selection: '#26394d',
+      gutter: '#858e98', activeLine: '#111417', warning: '#e8bd72', button: '#86b6ff',
+    },
+    syntax: {
+      keyword: '#d3a6ff', function: '#8fc7ff', variable: '#e4e7eb', string: '#a9d6a0',
+      number: '#f0b77a', comment: '#858e98', operator: '#82d4ce', punctuation: '#bdc5cd',
+      type: '#e8cf8b', property: '#f09ba5', tag: '#f09ba5', attribute: '#f0b77a',
+    },
+  },
 ];
 
 export const defaultTheme = themes[0];
