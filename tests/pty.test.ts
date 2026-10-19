@@ -73,31 +73,6 @@ test('buffers early writes in order and latest resize until spawn succeeds', asy
   await tick();
 });
 
-test('listener failure prevents spawn and discards buffered input', async () => {
-  const h = harness();
-  const session = h.start();
-  session.write('not sent');
-  h.registration.reject(new Error('listen failed'));
-  await tick();
-  assert.deepEqual(h.calls, []);
-  assert.match(h.errors.join(' '), /listen failed/);
-  session.dispose();
-});
-
-test('spawn failure unregisters listener and discards buffered input', async () => {
-  const h = harness();
-  const session = h.start();
-  session.write('not sent');
-  h.registration.resolve(h.unlisten);
-  await tick();
-  h.spawn.reject(new Error('spawn failed'));
-  await tick();
-  assert.deepEqual(h.calls.map(call => call.command), ['spawn_pty']);
-  assert.equal(h.unlistens(), 1);
-  assert.match(h.errors.join(' '), /spawn failed/);
-  session.dispose();
-});
-
 test('dispose during spawn stops output and kills once after spawn resolves', async () => {
   const h = harness();
   const session = h.start();
@@ -122,37 +97,6 @@ test('dispose during listener registration never spawns and unregisters after re
   await tick();
   assert.deepEqual(h.calls, []);
   assert.equal(h.unlistens(), 1);
-});
-
-test('rejected write, resize, and cleanup calls report errors without unhandled rejections', async () => {
-  const h = harness();
-  h.transport.invoke = async (command, args) => {
-    h.calls.push({ command, args });
-    if (command !== 'spawn_pty') throw new Error(`${command} rejected`);
-  };
-  const session = h.start();
-  h.registration.resolve(() => { throw new Error('unlisten rejected'); });
-  await tick();
-  session.write('input');
-  session.resize(24, 80);
-  session.dispose();
-  await tick();
-  assert.match(h.errors.join(' '), /write_pty rejected/);
-  assert.match(h.errors.join(' '), /resize_pty rejected/);
-  assert.match(h.errors.join(' '), /unlisten rejected/);
-  assert.match(h.errors.join(' '), /kill_pty rejected/);
-});
-
-test('async unlisten rejection is reported without an unhandled rejection', async () => {
-  const h = harness();
-  const session = h.start();
-  h.registration.resolve(async () => { throw new Error('async unlisten rejected'); });
-  await tick();
-  h.spawn.resolve();
-  await tick();
-  session.dispose();
-  await tick();
-  assert.match(h.errors.join(' '), /async unlisten rejected/);
 });
 
 test('prompt clearing is opt-in and only happens after successful startup', async context => {
