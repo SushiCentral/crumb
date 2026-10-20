@@ -3,6 +3,11 @@
   "productName": "crumb",
   "version": "0.1.0",
   "identifier": "ceditor",
+  "plugins": {
+    "fs": {
+      "requireLiteralLeadingDot": false
+    }
+  },
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",

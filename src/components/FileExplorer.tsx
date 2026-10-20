@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { create, exists, mkdir, readDir, remove, rename, watch, type DirEntry } from '@tauri-apps/plugin-fs';
-import { FileIcon, FolderIcon, NewFileIcon, NewFolderIcon } from './Icons';
+import { FolderIcon, NewFileIcon, NewFolderIcon } from './Icons';
+import { fileTreeIcon } from '../lib/file-icons';
+
+function TreeIcon({ name, directory, expanded = false }: { name: string; directory: boolean; expanded?: boolean }) {
+  return <img className="tree-file-icon" src={`/file-icons/${fileTreeIcon(name, directory, expanded)}.svg`} alt="" aria-hidden="true" draggable={false} />;
+}
+
+function Chevron({ expanded }: { expanded: boolean }) {
+  return <svg className={`tree-chevron-icon ${expanded ? 'expanded' : ''}`} width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m6 4 4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+}
 
 type Action = 'new-file' | 'new-folder' | 'rename' | 'delete';
 type Target = { path: string; name: string; isDirectory: boolean };
@@ -12,11 +21,11 @@ const sorted = (entries: DirEntry[]) => entries.sort((a, b) => Number(b.isDirect
 const visibleEntries = (entries: DirEntry[]) => sorted(entries.filter(entry => !(entry.isDirectory && entry.name === '.git')));
 
 type NodeProps = {
-  entry: DirEntry; path: string; level: number; refresh: number; activeFilePath: string | null;
+  entry: DirEntry; path: string; refresh: number; activeFilePath: string | null;
   onFileSelect: (path: string) => void; onMenu: (event: MouseEvent, target: Target) => void;
 };
 
-function TreeNode({ entry, path, level, refresh, activeFilePath, onFileSelect, onMenu }: NodeProps) {
+function TreeNode({ entry, path, refresh, activeFilePath, onFileSelect, onMenu }: NodeProps) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<DirEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -30,18 +39,19 @@ function TreeNode({ entry, path, level, refresh, activeFilePath, onFileSelect, o
   }, [entry.isDirectory, expanded, path, refresh]);
 
   return <>
-    <div className={`tree-row ${activeFilePath === path ? 'active' : ''}`} style={{ paddingLeft: level * 14 + 8 }} title={path}
-      onClick={() => entry.isDirectory ? setExpanded(value => !value) : onFileSelect(path)}
-      onContextMenu={event => onMenu(event, target)}>
-      <span className="tree-chevron">{entry.isDirectory ? expanded ? '▾' : '▸' : ''}</span>
-      {entry.isDirectory ? <FolderIcon className="tree-icon" /> : <FileIcon className="tree-icon" />}
-      <span className="tree-name">{entry.name}</span>
+    <div className={`tree-row ${activeFilePath === path ? 'active' : ''}`} title={path} onContextMenu={event => onMenu(event, target)}>
+      <button className="tree-entry" aria-expanded={entry.isDirectory ? expanded : undefined} aria-current={!entry.isDirectory && activeFilePath === path ? 'page' : undefined}
+        onClick={() => entry.isDirectory ? setExpanded(value => !value) : onFileSelect(path)}>
+        <span className="tree-chevron">{entry.isDirectory && <Chevron expanded={expanded} />}</span>
+        <TreeIcon name={entry.name} directory={entry.isDirectory} expanded={expanded} />
+        <span className="tree-name">{entry.name}</span>
+      </button>
       <button className="tree-more" aria-label={`Actions for ${entry.name}`} title="File actions"
         onClick={event => { event.stopPropagation(); onMenu(event, target); }}>⋯</button>
     </div>
     {expanded && error && <div className="tree-error" role="alert">{error}</div>}
-    {expanded && children.map(child => <TreeNode key={child.name} entry={child} path={joinPath(path, child.name)} level={level + 1} refresh={refresh}
-      activeFilePath={activeFilePath} onFileSelect={onFileSelect} onMenu={onMenu} />)}
+    {expanded && entry.isDirectory && <div className="tree-children">{children.map(child => <TreeNode key={child.name} entry={child} path={joinPath(path, child.name)} refresh={refresh}
+      activeFilePath={activeFilePath} onFileSelect={onFileSelect} onMenu={onMenu} />)}</div>}
   </>;
 }
 
@@ -64,9 +74,20 @@ export default function FileExplorer({ rootPath, onFileSelect, onFileOpenInSplit
   const [dialog, setDialog] = useState<{ action: Action; target: Target } | null>(null);
   const [name, setName] = useState('');
   const [menu, setMenu] = useState<{ x: number; y: number; target: Target } | null>(null);
+  const [isExplorerMenuOpen, setIsExplorerMenuOpen] = useState(false);
+  const [isRootExpanded, setIsRootExpanded] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
+  const explorerMenuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { setRootFiles([]); setError(null); }, [rootPath]);
+  useEffect(() => { setRootFiles([]); setError(null); setIsRootExpanded(true); }, [rootPath]);
+  useEffect(() => {
+    if (!isExplorerMenuOpen) return;
+    const dismiss = (event: PointerEvent) => { if (!explorerMenuRef.current?.contains(event.target as Node)) setIsExplorerMenuOpen(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setIsExplorerMenuOpen(false); explorerMenuRef.current?.querySelector<HTMLButtonElement>('.explorer-menu-toggle')?.focus(); } };
+    window.addEventListener('pointerdown', dismiss);
+    window.addEventListener('keydown', escape);
+    return () => { window.removeEventListener('pointerdown', dismiss); window.removeEventListener('keydown', escape); };
+  }, [isExplorerMenuOpen]);
   useEffect(() => {
     if (!rootPath) { setRootFiles([]); return; }
     let cancelled = false;
@@ -129,20 +150,25 @@ export default function FileExplorer({ rootPath, onFileSelect, onFileOpenInSplit
     event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY, target });
   };
   return <div className="file-explorer">
-    <div className="explorer-header"><strong>EXPLORER</strong><div className="explorer-actions">
+    <div className="explorer-header"><strong>Explorer</strong><div className="explorer-actions">
       {rootTarget && <>
         <button title="New File" aria-label="New File" onClick={() => start('new-file', rootTarget)}><NewFileIcon /></button>
         <button title="New Folder" aria-label="New Folder" onClick={() => start('new-folder', rootTarget)}><NewFolderIcon /></button>
       </>}
-      <button title="Open current terminal's folder" onClick={onOpenTerminalFolder}>Terminal folder</button>
-      <button title="Open Folder" aria-label="Open Folder" onClick={chooseFolder}><FolderIcon /></button>
+      <div className="explorer-menu-anchor" ref={explorerMenuRef}>
+        <button className="explorer-menu-toggle" title="Explorer actions" aria-label="Explorer actions" aria-expanded={isExplorerMenuOpen} aria-controls="explorer-actions-menu" onClick={() => setIsExplorerMenuOpen(value => !value)}>⋯</button>
+        {isExplorerMenuOpen && <div id="explorer-actions-menu" className="explorer-dropdown">
+          <button onClick={() => { setIsExplorerMenuOpen(false); void chooseFolder(); }}><FolderIcon />Open Folder…</button>
+          <button onClick={() => { setIsExplorerMenuOpen(false); onOpenTerminalFolder(); }}><FolderIcon />Open Terminal Folder</button>
+        </div>}
+      </div>
     </div></div>
     {(terminalFolderError || error) && <div className="tree-error" role="alert">{terminalFolderError || error}</div>}
     <div className="explorer-tree">{rootPath ? <>
-      <div className="explorer-root" title={rootPath}>{rootTarget?.name}</div>
-      {rootFiles.map(entry => <TreeNode key={`${rootPath}-${entry.name}`} entry={entry} path={joinPath(rootPath, entry.name)} level={0} refresh={refresh}
+      <button className="explorer-root" title={rootPath} aria-expanded={isRootExpanded} onClick={() => setIsRootExpanded(value => !value)}><Chevron expanded={isRootExpanded} /><span>{rootTarget?.name}</span></button>
+      {isRootExpanded && <div className="explorer-root-children">{rootFiles.map(entry => <TreeNode key={`${rootPath}-${entry.name}`} entry={entry} path={joinPath(rootPath, entry.name)} refresh={refresh}
         activeFilePath={activeFilePath} onFileSelect={onFileSelect} onMenu={showMenu} />)}
-      {rootFiles.length === 0 && !error && <div className="explorer-empty">Empty directory</div>}
+      {rootFiles.length === 0 && !error && <div className="explorer-empty">Empty directory</div>}</div>}
     </> : <div className="explorer-empty"><button className="explorer-open" onClick={chooseFolder}>Open Folder</button></div>}</div>
     {menu && <div className="tree-menu-backdrop" onClick={() => setMenu(null)} onContextMenu={event => { event.preventDefault(); setMenu(null); }}>
       <div className="tree-menu" style={{ left: menu.x, top: menu.y }} onClick={event => event.stopPropagation()}>

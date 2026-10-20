@@ -254,6 +254,22 @@ fn kill_pty(id: String, state: State<'_, PtyState>) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+fn enable_smooth_scrolling(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let webviews = app.webview_windows();
+    for webview in webviews.into_values() {
+        let _ = webview.with_webview(move |webview| {
+            use webkit2gtk::{SettingsExt, WebViewExt};
+            // WebKitGTK disables animated/kinetic scrolling by default, so
+            // wheel and trackpad swipes jump instead of easing like a browser.
+            if let Some(settings) = webview.inner().settings() {
+                settings.set_enable_smooth_scrolling(true);
+            }
+        });
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -263,6 +279,11 @@ pub fn run() {
             sessions: Arc::new(Mutex::new(HashMap::new())),
         })
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            #[cfg(target_os = "linux")]
+            enable_smooth_scrolling(app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             spawn_pty,
             write_pty,

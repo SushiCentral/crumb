@@ -1,7 +1,13 @@
-import { Fragment, lazy, Suspense, useState, useEffect, useRef } from "react";
+import { Fragment, lazy, Suspense, useState, useEffect, useMemo, useRef } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { readTextFile, writeTextFile, stat } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { scaleShortcut, nextZoom } from './lib/scale-shortcuts';
+import { readNumber, readBoolean, clampPanelHeight, clampSidebarWidth, readEditorPreferences, lineEnding } from './lib/preferences';
+import type { CursorInfo } from './lib/editor-extensions';
+import StatusBar from './components/StatusBar';
+import { parseRecentProjects, recordProject, type RecentProject } from './lib/recent-projects';
 import Editor, { type EditorHandle } from "./components/Editor";
 import BottomPanel from "./components/BottomPanel";
 import FileExplorer from "./components/FileExplorer";
@@ -34,12 +40,6 @@ interface EditorPane {
   kind: 'editor' | 'preview';
 }
 
-interface RecentItem {
-  path: string;
-  name: string;
-  lastOpened: number;
-}
-
 interface PendingCloseItem {
   tabId: string;
   paneId: string;
@@ -59,15 +59,6 @@ const readPreference = (key: string, fallback: string) => {
   try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
 };
 
-const readRecentFiles = (): RecentItem[] => {
-  try {
-    const raw = localStorage.getItem('crumb.recentFiles');
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-};
-
 const getFileNameFromPath = (path: string | null) => {
   if (!path) return "Untitled";
   const segments = path.split(/[\\/]/).filter(Boolean);
@@ -77,19 +68,18 @@ const getFileNameFromPath = (path: string | null) => {
 export default function App() {
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [sidebarTab, setSidebarTab] = useState<'explorer' | 'search'>('explorer');
-  const [sidebarWidth, setSidebarWidth] = useState(280);
-  const [panelHeight, setPanelHeight] = useState(() => Math.round(window.innerHeight * 0.4));
+  const [sidebarTab, setSidebarTab] = useState<'explorer' | 'search'>(() => readPreference('crumb.sidebarTab', 'explorer') === 'search' ? 'search' : 'explorer');
+  const [sidebarWidth, setSidebarWidth] = useState(() => clampSidebarWidth(readNumber(readPreference('crumb.sidebarWidth', ''), 280, 160, 10000), window.innerWidth));
+  const [panelHeight, setPanelHeight] = useState(() => clampPanelHeight(readNumber(readPreference('crumb.panelHeight', ''), Math.round(window.innerHeight * 0.4), 0, 10000), window.innerHeight));
+  const [zoomLevel, setZoomLevel] = useState(() => readNumber(readPreference('crumb.zoom', ''), 1, 0.5, 2));
   const [explorerRootPath, setExplorerRootPath] = useState<string | null>(null);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const [recentFiles, setRecentFiles] = useState<RecentItem[]>(readRecentFiles);
-
-  // Tab-specific scroll synchronization (binds preview and editor showing the same tab)
-  const [tabScrollRatios, setTabScrollRatios] = useState<Record<string, number>>({});
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>(() => parseRecentProjects(readPreference('crumb.recentProjects', '[]')));
 
   const [themeId, setThemeId] = useState(() => getTheme(readPreference('crumb.theme', 'crumb')).id);
+  const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
   const [codeFontOverride, setCodeFontOverride] = useState(() => {
     const saved = readPreference('crumb.codeFont', '');
     return codeFonts.find(font => font === saved) ?? null;
@@ -99,6 +89,9 @@ export default function App() {
     return Number.isFinite(value) ? Math.min(24, Math.max(10, value)) : 13;
   });
   const [wordWrap, setWordWrap] = useState(() => readPreference('crumb.wordWrap', 'true') !== 'false');
+  const [editorPreferences, setEditorPreferences] = useState(() => readEditorPreferences(key => readPreference(key, '')));
+  const [clearPromptOnStart, setClearPromptOnStart] = useState(() => readBoolean(readPreference('crumb.terminalClearPrompt', ''), false));
+  const [paneCursors, setPaneCursors] = useState<Record<string, CursorInfo>>({});
 
   // Empty workspace state: start with 0 tabs so Welcome Screen is displayed first
   const [tabs, setTabs] = useState<EditorTab[]>([]);
@@ -118,6 +111,9 @@ export default function App() {
   const [terminalFolderError, setTerminalFolderError] = useState<string | null>(null);
 
   const tabsRef = useRef(tabs);
+  const zoomQueueRef = useRef(Promise.resolve());
+  const previousZoomRef = useRef(zoomLevel);
+  const previousFontSizeRef = useRef(fontSize);
   const activeTabIdRef = useRef(activeTabId);
   const panesRef = useRef(panes);
   const activePaneIdRef = useRef(activePaneId);
@@ -140,6 +136,8 @@ export default function App() {
   activePaneIdRef.current = activePaneId;
 
   const activeTab = tabs.find(tab => tab.id === activeTabId);
+  const activeLineEnding = useMemo(() => activeTab ? lineEnding(activeTab.content) : '—', [activeTab?.content]);
+  const activeCursor = paneCursors[activePaneId] ?? paneCursors[panes.find(pane => pane.kind === 'editor' && pane.tabId === activeTabId)?.id ?? ''];
   const canPreviewMarkdown = activeTab ? isMarkdownPath(activeTab.path) : false;
   const isPreviewOpen = canPreviewMarkdown && panes.some(pane => pane.kind === 'preview' && pane.tabId === activeTab?.id);
 
@@ -158,25 +156,77 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
-  const addRecentFile = (filePath: string) => {
-    const name = getFileNameFromPath(filePath);
-    setRecentFiles(prev => {
-      const updated = [{ path: filePath, name, lastOpened: Date.now() }, ...prev.filter(item => item.path !== filePath)].slice(0, 15);
-      try { localStorage.setItem('crumb.recentFiles', JSON.stringify(updated)); } catch {}
-      return updated;
+  useEffect(() => {
+    try {
+      for (const [key, value] of Object.entries(editorPreferences)) localStorage.setItem(`crumb.${key}`, String(value));
+    } catch { /* Storage may be unavailable. */ }
+  }, [editorPreferences]);
+
+  useEffect(() => {
+    try { localStorage.setItem('crumb.terminalClearPrompt', String(clearPromptOnStart)); } catch {}
+  }, [clearPromptOnStart]);
+
+  useEffect(() => { if (!isSettingsOpen) setPreviewThemeId(null); }, [isSettingsOpen]);
+
+  const reportCursor = (paneId: string, cursor: CursorInfo) => {
+    setPaneCursors(previous => {
+      const old = previous[paneId];
+      return old?.line === cursor.line && old.column === cursor.column && old.selected === cursor.selected
+        ? previous : { ...previous, [paneId]: cursor };
     });
   };
 
-  const clearRecentFiles = () => {
-    setRecentFiles([]);
-    try { localStorage.removeItem('crumb.recentFiles'); } catch {}
+  useEffect(() => {
+    try {
+      localStorage.setItem('crumb.sidebarWidth', String(sidebarWidth));
+      localStorage.setItem('crumb.panelHeight', String(panelHeight));
+      localStorage.setItem('crumb.sidebarTab', sidebarTab);
+    } catch { /* Storage may be unavailable. */ }
+  }, [sidebarWidth, panelHeight, sidebarTab]);
+
+  useEffect(() => {
+    try { localStorage.setItem('crumb.zoom', String(zoomLevel)); } catch {}
+    zoomQueueRef.current = zoomQueueRef.current
+      .then(() => getCurrentWebview().setZoom(zoomLevel))
+      .catch(error => { console.error('Could not scale the interface:', error); });
+    if (previousZoomRef.current !== zoomLevel) addToast(`Zoom ${Math.round(zoomLevel * 100)}%`);
+    previousZoomRef.current = zoomLevel;
+  }, [zoomLevel]);
+
+  useEffect(() => {
+    if (previousFontSizeRef.current !== fontSize) addToast(`Font ${fontSize}px`);
+    previousFontSizeRef.current = fontSize;
+  }, [fontSize]);
+
+  useEffect(() => {
+    const resize = () => {
+      setPanelHeight(value => clampPanelHeight(value, window.innerHeight));
+      setSidebarWidth(value => clampSidebarWidth(value, window.innerWidth));
+    };
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, []);
+
+  const resetLayout = () => {
+    setSidebarWidth(clampSidebarWidth(280, window.innerWidth));
+    setPanelHeight(clampPanelHeight(Math.round(window.innerHeight * 0.4), window.innerHeight));
+    setSidebarTab('explorer');
+    setIsSidebarOpen(true);
+    setIsPanelOpen(true);
+    setPaneWidths({});
+    addToast('Layout reset');
   };
 
-  const updateTabScrollRatio = (tabId: string, ratio: number) => {
-    setTabScrollRatios(prev => {
-      if (Math.abs((prev[tabId] ?? -1) - ratio) < 0.005) return prev;
-      return { ...prev, [tabId]: ratio };
-    });
+  const addRecentProject = (directory: string) => {
+    setRecentProjects(previous => recordProject(previous, directory));
+  };
+
+  useEffect(() => {
+    try { localStorage.setItem('crumb.recentProjects', JSON.stringify(recentProjects)); } catch {}
+  }, [recentProjects]);
+
+  const clearRecentProjects = () => {
+    setRecentProjects([]);
   };
 
   const updatePanes = (update: (current: EditorPane[]) => EditorPane[]) => {
@@ -259,7 +309,7 @@ export default function App() {
     if (editorPane) activatePaneTab(editorPane.id, id);
   };
 
-  const theme = getTheme(themeId);
+  const theme = getTheme(previewThemeId ?? themeId);
   const codeFont = codeFontOverride ?? theme.codeFont;
 
   useEffect(() => {
@@ -283,6 +333,7 @@ export default function App() {
     try {
       const path = await invoke<string>("get_pty_cwd", { id: activeTerminalSessionId });
       setExplorerRootPath(path);
+      addRecentProject(path);
       setIsSidebarOpen(true);
       setSidebarTab('explorer');
       setTerminalFolderError(null);
@@ -294,9 +345,21 @@ export default function App() {
 
   const handleFolderOpened = (path: string) => {
     setExplorerRootPath(path);
+    addRecentProject(path);
     setOpenTerminalRequest(previous => ({ path, sequence: (previous?.sequence ?? 0) + 1 }));
     setIsPanelOpen(true);
     setTerminalFocusRequest(value => value + 1);
+  };
+
+  const handleOpenRecentProject = async (path: string) => {
+    try {
+      if (!(await stat(path)).isDirectory) throw new Error('This directory is no longer available.');
+      handleFolderOpened(path);
+      setIsSidebarOpen(true);
+      setSidebarTab('explorer');
+    } catch (error) {
+      addToast(`Could not open project: ${String(error)}`, 'error');
+    }
   };
 
   const handleChooseFolder = async () => {
@@ -363,8 +426,6 @@ export default function App() {
         }
       }
 
-      addRecentFile(selectedPath);
-
       if (lineNumber != null) {
         setTimeout(() => {
           const pane = panesRef.current.find(p => p.id === targetPaneId && p.kind === 'editor') ?? panesRef.current.find(p => p.tabId === targetTabId && p.kind === 'editor');
@@ -407,7 +468,6 @@ export default function App() {
       const contentToSave = tab.content;
       await writeTextFile(targetPath, contentToSave);
       updateTabs(current => current.map(item => item.id === id ? { ...item, path: targetPath, savedContent: contentToSave } : item));
-      addRecentFile(targetPath);
       addToast(`Saved ${getFileNameFromPath(targetPath)}`, 'success');
       return true;
     } catch (error) {
@@ -558,6 +618,17 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const scaling = scaleShortcut(e);
+      if (scaling) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (scaling.target === 'font') {
+          setFontSize(value => scaling.reset ? 13 : Math.min(24, Math.max(10, value + scaling.delta)));
+        } else {
+          setZoomLevel(value => scaling.reset ? 1 : nextZoom(value, scaling.delta));
+        }
+        return;
+      }
       if (currentPendingCloseId) return;
       if (isCloseAllConfirmationOpen) {
         if (e.key === 'Escape') {
@@ -696,17 +767,7 @@ export default function App() {
 
       <div style={{ flex: 1, minHeight: 0, display: "flex", overflow: "hidden" }}>
         {/* Activity Bar */}
-        <div style={{
-          width: "48px",
-          minWidth: "48px",
-          backgroundColor: "var(--activity)",
-          borderRight: "1px solid var(--border)",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          paddingTop: "8px",
-          gap: "6px"
-        }}>
+        <div className="activity-bar">
           {/* Explorer Button */}
           <button
             onClick={() => {
@@ -721,22 +782,7 @@ export default function App() {
             }}
             title="Explorer (⌘B)"
             aria-label="Toggle file explorer"
-            style={{
-              width: "36px",
-              height: "36px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "none",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-              borderLeft: isSidebarOpen && sidebarTab === 'explorer' ? "2px solid var(--accent)" : "2px solid transparent",
-              opacity: isSidebarOpen && sidebarTab === 'explorer' ? 1 : 0.5,
-              transition: "all 0.15s ease",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--hover)"; e.currentTarget.style.opacity = "1"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.opacity = isSidebarOpen && sidebarTab === 'explorer' ? "1" : "0.5"; }}
+            className={`activity-btn ${isSidebarOpen && sidebarTab === 'explorer' ? 'active' : ''}`}
           >
             <FolderIcon width={20} height={20} />
           </button>
@@ -755,48 +801,19 @@ export default function App() {
             }}
             title="Search in Files (⌘Shift+F)"
             aria-label="Toggle search in files"
-            style={{
-              width: "36px",
-              height: "36px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "none",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-              borderLeft: isSidebarOpen && sidebarTab === 'search' ? "2px solid var(--accent)" : "2px solid transparent",
-              opacity: isSidebarOpen && sidebarTab === 'search' ? 1 : 0.5,
-              transition: "all 0.15s ease",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--hover)"; e.currentTarget.style.opacity = "1"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.opacity = isSidebarOpen && sidebarTab === 'search' ? "1" : "0.5"; }}
+            className={`activity-btn ${isSidebarOpen && sidebarTab === 'search' ? 'active' : ''}`}
           >
             <SearchIcon width={19} height={19} />
           </button>
 
-          <div style={{ flex: 1 }} />
+          <div className="activity-bar-spacer" />
 
           {/* Settings Button */}
           <button
             onClick={() => setIsSettingsOpen(true)}
             title="Editor Settings (⌘,)"
             aria-label="Open settings"
-            style={{
-              width: "36px",
-              height: "36px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "none",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-              opacity: 0.6,
-              transition: "all 0.15s ease",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--hover)"; e.currentTarget.style.opacity = "1"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.opacity = "0.6"; }}
+            className="activity-btn activity-btn-settings"
           >
             <SettingsIcon width={19} height={19} />
           </button>
@@ -806,7 +823,7 @@ export default function App() {
             onClick={() => setIsPaletteOpen(true)}
             title="Commands and themes (Ctrl/Cmd+Shift+P)"
             aria-label="Open command palette"
-            style={{ width: '36px', height: '36px', marginBottom: '8px', border: 'none', borderRadius: '6px', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: '19px' }}
+            className="activity-btn activity-btn-palette"
           >
             ›
           </button>
@@ -865,7 +882,7 @@ export default function App() {
               if (!sidebarDraggingRef.current) return;
               const left = event.currentTarget.parentElement?.getBoundingClientRect().left ?? 0;
               const available = event.currentTarget.parentElement?.clientWidth ?? window.innerWidth;
-              const newWidth = Math.max(160, Math.min(available - 48 - 220, event.clientX - left - 48));
+              const newWidth = clampSidebarWidth(event.clientX - left - 48, available);
               currentDragWidthRef.current = newWidth;
               if (sidebarContainerRef.current) {
                 sidebarContainerRef.current.style.width = `${newWidth}px`;
@@ -912,8 +929,9 @@ export default function App() {
               onOpenPalette={() => setIsPaletteOpen(true)}
               onOpenSettings={() => setIsSettingsOpen(true)}
               onToggleTerminal={() => setIsPanelOpen(v => !v)}
-              recentFiles={recentFiles}
-              onClearRecentFiles={clearRecentFiles}
+              recentProjects={recentProjects}
+              onOpenProject={path => { void handleOpenRecentProject(path); }}
+              onClearRecentProjects={clearRecentProjects}
             />
           ) : (
             <div ref={workspaceRef} className="editor-workspace" style={{ flex: 1 }}>
@@ -962,11 +980,10 @@ export default function App() {
                         <MarkdownPreview
                           content={file.content}
                           path={file.path}
+                          tabId={file.id}
                           onOpenFile={path => { void handleOpenFile(path); }}
                           onClose={() => closePane(pane.id)}
                           onActivate={() => selectPane(pane.id)}
-                          syncScrollRatio={tabScrollRatios[file.id]}
-                          onScrollRatio={ratio => updateTabScrollRatio(file.id, ratio)}
                         />
                       </Suspense>
                     ) : <>
@@ -994,10 +1011,10 @@ export default function App() {
                           fontSize={fontSize}
                           fontFamily={codeFont}
                           wordWrap={wordWrap}
+                          preferences={editorPreferences}
+                          onCursorChange={cursor => reportCursor(pane.id, cursor)}
                           onChange={value => handleEditorChange(file.id, value)}
                           onFocus={() => selectPane(pane.id)}
-                          onScrollRatio={ratio => updateTabScrollRatio(file.id, ratio)}
-                          syncScrollRatio={tabScrollRatios[file.id]}
                         />
                       </div>
                     </>}
@@ -1029,7 +1046,7 @@ export default function App() {
             if (!panelDraggingRef.current) return;
             const bottom = event.currentTarget.parentElement?.getBoundingClientRect().bottom ?? window.innerHeight;
             const available = event.currentTarget.parentElement?.clientHeight ?? window.innerHeight;
-            const newHeight = Math.max(120, Math.min(available - 200, bottom - event.clientY));
+              const newHeight = clampPanelHeight(bottom - event.clientY, available);
             currentDragHeightRef.current = newHeight;
             if (panelContainerRef.current) {
               panelContainerRef.current.style.height = `${newHeight}px`;
@@ -1074,10 +1091,11 @@ export default function App() {
           display: isPanelOpen ? "block" : "none"
         }}
       >
-        <BottomPanel onClose={() => setIsPanelOpen(false)} onActiveSessionChange={setActiveTerminalSessionId} theme={theme} fontSize={fontSize} fontFamily={codeFont} focusRequest={terminalFocusRequest} workingDirectory={explorerRootPath} openTerminalRequest={openTerminalRequest} />
+        <BottomPanel isOpen={isPanelOpen} clearPromptOnStart={clearPromptOnStart} onClose={() => setIsPanelOpen(false)} onActiveSessionChange={setActiveTerminalSessionId} theme={theme} fontSize={fontSize} fontFamily={codeFont} focusRequest={terminalFocusRequest} workingDirectory={explorerRootPath} openTerminalRequest={openTerminalRequest} />
       </div>
 
       {/* Command Palette */}
+      <StatusBar cursor={activeCursor} preferences={editorPreferences} lineEnding={activeLineEnding} language={activeTab ? languageName(activeTab.path) : 'No file'} wordWrap={wordWrap} zoom={zoomLevel} theme={theme.name} />
       {isPaletteOpen && (
         <CommandPalette
           commands={commands}
@@ -1092,7 +1110,13 @@ export default function App() {
 
       {/* Settings Modal */}
       {isSettingsOpen && (
-        <SettingsModal
+          <SettingsModal
+            onThemePreview={setPreviewThemeId}
+            clearPromptOnStart={clearPromptOnStart}
+            onClearPromptOnStartChange={setClearPromptOnStart}
+            editorPreferences={editorPreferences}
+            onEditorPreferencesChange={setEditorPreferences}
+            onResetLayout={resetLayout}
           themes={themes}
           currentThemeId={themeId}
           onThemeChange={setThemeId}

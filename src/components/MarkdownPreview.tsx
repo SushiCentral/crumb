@@ -1,17 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { attachScrollSync } from '../lib/scroll-sync';
 
 interface Props {
   content: string;
   path: string;
+  tabId: string;
   onOpenFile: (path: string) => void;
   onClose: () => void;
   onActivate: () => void;
-  syncScrollRatio?: number;
-  onScrollRatio?: (ratio: number) => void;
 }
 
 function isRemote(source: string) {
@@ -56,56 +56,42 @@ function PreviewImage({ src, alt, path }: { src?: string; alt?: string; path: st
   return resolvedSource ? <img src={resolvedSource} alt={alt ?? ''} /> : <span className="markdown-image-fallback">{alt || src || 'Image unavailable'}</span>;
 }
 
-export default function MarkdownPreview({ content, path, onOpenFile, onClose, onActivate, syncScrollRatio, onScrollRatio }: Props) {
+export default function MarkdownPreview({ content, path, tabId, onOpenFile, onClose, onActivate }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const isProgrammaticScrollRef = useRef(false);
-  const onScrollRatioRef = useRef(onScrollRatio);
+  const onOpenFileRef = useRef(onOpenFile);
+  onOpenFileRef.current = onOpenFile;
 
-  useEffect(() => { onScrollRatioRef.current = onScrollRatio; }, [onScrollRatio]);
+  // Scroll synchronization rerenders the pane. Keep parsing and image mounts tied
+  // to document changes, not to every scroll position or inline callback identity.
+  const document = useMemo(() => (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        img: ({ src, alt }) => <PreviewImage src={src} alt={alt} path={path} />,
+        a: ({ href, children }) => <a href={href} onClick={event => {
+          event.preventDefault();
+          if (!href) return;
+          if (/^https?:\/\//i.test(href)) void openUrl(href).catch(console.error);
+          else if (!href.startsWith('#') && !/^[a-z]+:/i.test(href)) onOpenFileRef.current(relativeFilePath(path, href));
+        }}>{children}</a>,
+      }}
+    >{content}</ReactMarkdown>
+  ), [content, path]);
 
-  useEffect(() => {
-    if (syncScrollRatio == null || !scrollRef.current) return;
-    const el = scrollRef.current;
-    const max = el.scrollHeight - el.clientHeight;
-    if (max <= 0) return;
-    const currentRatio = el.scrollTop / max;
-    if (Math.abs(currentRatio - syncScrollRatio) > 0.005) {
-      isProgrammaticScrollRef.current = true;
-      el.scrollTop = syncScrollRatio * max;
-      requestAnimationFrame(() => {
-        isProgrammaticScrollRef.current = false;
-      });
-    }
-  }, [syncScrollRatio]);
-
+  // Peer panes (an editor split, another preview) publish under the same tab
+  // id. Same-frame DOM exchange keeps both bars consistent with no App
+  // re-render per scroll frame.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const handleScroll = () => {
-      if (isProgrammaticScrollRef.current) return;
-      const max = el.scrollHeight - el.clientHeight;
-      if (max > 0) onScrollRatioRef.current?.(el.scrollTop / max);
-    };
-    el.addEventListener('scroll', handleScroll, { passive: true });
-    return () => el.removeEventListener('scroll', handleScroll);
-  }, []);
+    return attachScrollSync(el, tabId);
+  }, [tabId]);
 
   return <section className="markdown-preview" aria-label="Markdown preview" onMouseDown={onActivate}>
     <div className="markdown-preview-header"><span>PREVIEW · {path.split(/[\\/]/).pop()}</span><button aria-label="Close Markdown preview" title="Close preview" onClick={onClose}>×</button></div>
     <div ref={scrollRef} className="markdown-preview-scroll">
       <article className="markdown-body">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            img: ({ src, alt }) => <PreviewImage src={src} alt={alt} path={path} />,
-            a: ({ href, children }) => <a href={href} onClick={event => {
-              event.preventDefault();
-              if (!href) return;
-              if (/^https?:\/\//i.test(href)) void openUrl(href).catch(console.error);
-              else if (!href.startsWith('#') && !/^[a-z]+:/i.test(href)) onOpenFile(relativeFilePath(path, href));
-            }}>{children}</a>,
-          }}
-        >{content}</ReactMarkdown>
+        {document}
       </article>
     </div>
   </section>;

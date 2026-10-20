@@ -51,6 +51,10 @@ npm run tauri:dev
 
 ## Keyboard Shortcuts
 
+- `Ctrl/Cmd + =` / `-` — Zoom the whole interface in / out (50–200%)
+- `Ctrl/Cmd + Shift + =` / `-` — Increase / decrease editor and terminal font size
+- `Ctrl/Cmd + 0` — Reset interface zoom to 100%
+- `Ctrl/Cmd + Shift + 0` — Reset editor and terminal font size to 13px
 - `Ctrl/Cmd + O` — Open a file
 - `Ctrl/Cmd + P` — Search filenames in the open folder and open tabs
 - `Ctrl/Cmd + S` — Save file
@@ -63,6 +67,10 @@ npm run tauri:dev
 - `Ctrl/Cmd + Shift + P` — Open the command palette
 
 ## Themes and commands
+
+Settings (`Ctrl/Cmd + ,`) has Appearance, Editor, Terminal, and Workspace tabs. Hover or focus a theme card to preview it; click to save it. Editor preferences include line numbers, bracket matching and closing, active-line highlighting, wrapping, and 2/3/4-character indentation with spaces or tabs. Changes preserve undo history and are restored on restart. Terminal prompt clearing is optional and off by default; it applies to new terminals only.
+
+The status bar shows the active editor's cursor and selection, indentation, UTF-8 encoding, actual line-ending format, language, wrapping, zoom, and theme. Sidebar width, panel height, sidebar tab, and zoom are remembered. Workspace settings includes Reset layout, which restores panel sizes and visibility without changing fonts, zoom, or themes.
 
 Open the command palette with `Ctrl/Cmd + Shift + P`, then choose **Preferences: Color Theme**. Crumb includes Crumb, One Dark, Dracula, Catppuccin Mocha, Catppuccin Latte, Nord, Tokyo Night, Gruvbox Dark, Rosé Pine, and Solarized Light. Themes color the entire workspace and set an interface and code font. Choose **Preferences: Editor Font** to override the code font for the editor and terminal, or return to the theme default. Fonts are bundled for offline use. Theme, font choice, and font size are saved locally and restored on restart.
 

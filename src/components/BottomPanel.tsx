@@ -51,6 +51,8 @@ const TerminalIcon = () => (
 );
 
 interface BottomPanelProps {
+  isOpen: boolean;
+  clearPromptOnStart: boolean;
   onClose?: () => void;
   onActiveSessionChange: (sessionId: string | null) => void;
   theme: Theme;
@@ -73,7 +75,7 @@ interface TerminalGroup {
   activeTerminalId: string;
 }
 
-export default function BottomPanel({ onClose, onActiveSessionChange, theme, fontSize, fontFamily, focusRequest, workingDirectory, openTerminalRequest }: BottomPanelProps) {
+export default function BottomPanel({ isOpen, clearPromptOnStart, onClose, onActiveSessionChange, theme, fontSize, fontFamily, focusRequest, workingDirectory, openTerminalRequest }: BottomPanelProps) {
   const [activeTab, setActiveTab] = useState<'terminal' | 'output' | 'problems'>('terminal');
   
   // Terminal Multiplexing State - Initialized lazily to avoid Date clock drifts in strict mode
@@ -81,7 +83,7 @@ export default function BottomPanel({ onClose, onActiveSessionChange, theme, fon
     const termId = crypto.randomUUID();
     return [{ id: crypto.randomUUID(), terminals: [{ id: termId, cwd: workingDirectory }], activeTerminalId: termId }];
   });
-  const [activeGroupId, setActiveGroupId] = useState<string>(groups[0].id);
+  const [activeGroupId, setActiveGroupId] = useState<string>(() => groups[0]?.id ?? '');
   const [titles, setTitles] = useState<Record<string, string>>({});
 
   const [availableShells, setAvailableShells] = useState<string[]>([]);
@@ -102,6 +104,21 @@ export default function BottomPanel({ onClose, onActiveSessionChange, theme, fon
   useEffect(() => {
     if (focusRequest > 0) setActiveTab('terminal');
   }, [focusRequest]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setGroups(current => {
+      if (current.length > 0) return current;
+      const termId = crypto.randomUUID();
+      return [{ id: crypto.randomUUID(), terminals: [{ id: termId, cwd: workingDirectory }], activeTerminalId: termId }];
+    });
+  }, [isOpen, workingDirectory]);
+
+  useEffect(() => {
+    if (groups.length > 0 && !groups.some(group => group.id === activeGroupId)) {
+      setActiveGroupId(groups[0].id);
+    }
+  }, [groups, activeGroupId]);
 
   const handleNewTerminal = (shell?: string, cwd = workingDirectory) => {
     const newTermId = crypto.randomUUID();
@@ -290,6 +307,7 @@ export default function BottomPanel({ onClose, onActiveSessionChange, theme, fon
                   >
                     <Terminal
                       id={term.id}
+                      clearPromptOnStart={clearPromptOnStart}
                       theme={theme}
                       fontSize={fontSize}
                       fontFamily={fontFamily}

@@ -25,3 +25,8 @@ serde_json = "1"
 tauri-plugin-fs = { version = "2", features = ["watch"] }
 tauri-plugin-dialog = "2"
 portable-pty = "0.9.0"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Pins webkit2gtk alongside wry (which uses "=2.0.2", features v2_38) so the
+# version and features unify instead of building a second copy.
+webkit2gtk = { version = "2.0.2", features = ["v2_38"] }
