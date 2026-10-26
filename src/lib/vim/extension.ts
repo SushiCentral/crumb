@@ -8,6 +8,7 @@ import {
   cancelTransientInput,
   captureVimAdapter,
   getVimPublicState,
+  observeVimPublicState,
   patchVimAdapter,
   restoreVimAdapter,
   type VimDocumentMarks,
@@ -34,6 +35,8 @@ export interface VimExtension {
   removeMappings(): void;
   /** Typed mode and pending-input state for the active adapter. */
   getState(view: EditorView): VimPublicState;
+  /** Subscribe to typed mode/pending changes; fires immediately. */
+  observeState(view: EditorView, listener: (state: VimPublicState) => void): () => void;
   /** Exit insert/visual/search and clear pending keys before a lifecycle change. */
   cancelInput(view: EditorView): void;
   /** Capture session state before the caller replaces the EditorState. */
@@ -70,6 +73,7 @@ export function createVimExtension(config: VimConfig = defaultVimConfig): VimExt
     installMappings: mappings.installMappings,
     removeMappings: mappings.removeMappings,
     getState: getVimPublicState,
+    observeState: observeVimPublicState,
     cancelInput: cancelTransientInput,
     beforeActivation: (view, documentId) => {
       const captured = captureVimAdapter(view);

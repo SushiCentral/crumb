@@ -346,6 +346,29 @@ export function getVimPublicState(view: EditorView): VimPublicState {
   return { mode: 'normal', pending: vim.status ?? '' };
 }
 
+const VIM_STATE_EVENTS = ['vim-mode-change', 'vim-keypress', 'vim-command-done', 'dialog'] as const;
+
+/**
+ * Observe the public mode/pending snapshot for one adapter. The package fires
+ * mode, key, command-completion, and prompt-dialog signals; together they cover
+ * every transition the status bar renders without polling engine internals.
+ * The listener fires immediately, and a missing adapter reports `inactive`.
+ */
+export function observeVimPublicState(
+  view: EditorView,
+  listener: (state: VimPublicState) => void,
+): () => void {
+  const notify = () => listener(getVimPublicState(view));
+  notify();
+
+  const cm = getCM(view);
+  if (!cm) return () => {};
+  for (const event of VIM_STATE_EVENTS) cm.on(event, notify);
+  return () => {
+    for (const event of VIM_STATE_EVENTS) cm.off(event, notify);
+  };
+}
+
 /**
  * Finish mode and pending-input cleanup while the adapter is still alive.
  * This must run before `EditorView.setState()`; by plugin-destroy time the

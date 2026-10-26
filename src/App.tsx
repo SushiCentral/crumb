@@ -6,8 +6,10 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { scaleShortcut, nextZoom } from './lib/scale-shortcuts';
 import { readNumber, readBoolean, clampPanelHeight, clampSidebarWidth, readEditorPreferences, lineEnding } from './lib/preferences';
 import { createVimSession } from './lib/vim/session';
+import type { VimPublicState } from './lib/vim/extension';
+import { shouldVimOwnShortcut, type VimFocusedSurface } from './lib/vim/shortcuts';
 import type { CursorInfo } from './lib/editor-extensions';
-import StatusBar from './components/StatusBar';
+import StatusBar, { type VimStatus } from './components/StatusBar';
 import { parseRecentProjects, recordProject, type RecentProject } from './lib/recent-projects';
 import Editor, { type EditorHandle } from "./components/Editor";
 import BottomPanel from "./components/BottomPanel";
@@ -26,6 +28,49 @@ import "./App.css";
 const initialDoc = `// Welcome to Crumb\n\nfunction hello() {\n  console.log("Hello, world!");\n}\n`;
 const MarkdownPreview = lazy(() => import('./components/MarkdownPreview'));
 const isMarkdownPath = (path: string | null) => path != null && /\.(md|markdown)$/i.test(path);
+const isMacPlatform = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+interface FocusedSurfaceFlags {
+  paletteOpen: boolean;
+  dialogOpen: boolean;
+}
+
+/**
+ * Classify the element that currently owns keyboard input. Vim may only take
+ * shortcuts when the real editor content is focused; prompts, panels, dialogs,
+ * the terminal, and ordinary inputs keep their own key handling.
+ */
+function focusedSurfaceFor(element: Element | null, flags: FocusedSurfaceFlags): VimFocusedSurface {
+  if (flags.paletteOpen) return 'palette';
+  if (flags.dialogOpen) return 'dialog';
+  if (!element) return 'other';
+
+  if (element.closest('.xterm')) return 'terminal';
+  if (element.closest('.command-palette, .palette-overlay')) return 'palette';
+  if (element.closest('.settings-overlay, .settings-modal, [role="dialog"]')) return 'dialog';
+  if (element.closest('.cm-editor')) {
+    // Vim prompts and CodeMirror panels are rendered inside the editor DOM,
+    // but their inputs must not be treated as the editor surface.
+    return element.matches('input, textarea, select') || element.closest('.cm-panel')
+      ? 'input'
+      : 'editor';
+  }
+  if (element.matches('input, textarea, select, [contenteditable="true"]')) return 'input';
+  return 'other';
+}
+
+/**
+ * The Vim lifecycle exposes one pending status string (counts, register, and
+ * command prefix combined). Forward it as the pending command field; mode is
+ * the typed lifecycle mode. Inactive editors have no status bar entry.
+ */
+function toStatusBarVimStatus(state: VimPublicState | undefined): VimStatus | undefined {
+  if (!state || state.mode === 'inactive') return undefined;
+  return {
+    mode: state.mode,
+    pending: state.pending ? { command: state.pending } : undefined,
+  };
+}
 
 interface EditorTab {
   id: string;
@@ -94,6 +139,7 @@ export default function App() {
   const [vimSession] = useState(() => createVimSession());
   const [clearPromptOnStart, setClearPromptOnStart] = useState(() => readBoolean(readPreference('crumb.terminalClearPrompt', ''), false));
   const [paneCursors, setPaneCursors] = useState<Record<string, CursorInfo>>({});
+  const [paneVimStates, setPaneVimStates] = useState<Record<string, VimPublicState>>({});
 
   // Empty workspace state: start with 0 tabs so Welcome Screen is displayed first
   const [tabs, setTabs] = useState<EditorTab[]>([]);
@@ -140,6 +186,8 @@ export default function App() {
   const activeTab = tabs.find(tab => tab.id === activeTabId);
   const activeLineEnding = useMemo(() => activeTab ? lineEnding(activeTab.content) : '—', [activeTab?.content]);
   const activeCursor = paneCursors[activePaneId] ?? paneCursors[panes.find(pane => pane.kind === 'editor' && pane.tabId === activeTabId)?.id ?? ''];
+  const activeVimState = editorPreferences.vimModeEnabled ? paneVimStates[activePaneId] : undefined;
+  const vimStatus = toStatusBarVimStatus(activeVimState);
   const canPreviewMarkdown = activeTab ? isMarkdownPath(activeTab.path) : false;
   const isPreviewOpen = canPreviewMarkdown && panes.some(pane => pane.kind === 'preview' && pane.tabId === activeTab?.id);
 
@@ -184,6 +232,14 @@ export default function App() {
       const old = previous[paneId];
       return old?.line === cursor.line && old.column === cursor.column && old.selected === cursor.selected
         ? previous : { ...previous, [paneId]: cursor };
+    });
+  };
+
+  const reportVimState = (paneId: string, state: VimPublicState) => {
+    setPaneVimStates(previous => {
+      const old = previous[paneId];
+      return old?.mode === state.mode && old.pending === state.pending
+        ? previous : { ...previous, [paneId]: state };
     });
   };
 
@@ -629,6 +685,33 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const focusedElement = document.activeElement;
+      const focusedPane = focusedElement instanceof Element
+        ? focusedElement.closest<HTMLElement>('[data-pane-id]')
+        : null;
+      const vimState = editorRefs.current
+        .get(focusedPane?.dataset.paneId ?? activePaneIdRef.current)
+        ?.getVimState() ?? null;
+      const vimOwnsShortcut = shouldVimOwnShortcut({
+        enabled: editorPreferences.vimModeEnabled,
+        focusedSurface: focusedSurfaceFor(focusedElement, {
+          paletteOpen: isPaletteOpen,
+          dialogOpen: isSettingsOpen || currentPendingCloseId != null || isCloseAllConfirmationOpen,
+        }),
+        mode: vimState?.mode ?? 'inactive',
+        key: e.key,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        altKey: e.altKey,
+        shiftKey: e.shiftKey,
+        // App does not install source-level mappings of its own in this task.
+        mappingOwnsKey: false,
+        isMac: isMacPlatform,
+      });
+      // Do not preventDefault/stopPropagation here: returning lets the event
+      // continue to the focused CodeMirror Vim adapter, which owns the key.
+      if (vimOwnsShortcut) return;
+
       const scaling = scaleShortcut(e);
       if (scaling) {
         e.preventDefault();
@@ -739,7 +822,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [isPaletteOpen, isSettingsOpen, isPanelOpen, currentPendingCloseId, isCloseAllConfirmationOpen]);
+  }, [editorPreferences.vimModeEnabled, isPaletteOpen, isSettingsOpen, isPanelOpen, currentPendingCloseId, isCloseAllConfirmationOpen]);
 
   const commands: PaletteCommand[] = [
     { id: 'settings', label: 'Preferences: Open Settings', shortcut: 'Ctrl/Cmd ,', run: () => setIsSettingsOpen(true) },
@@ -1026,6 +1109,7 @@ export default function App() {
                           wordWrap={wordWrap}
                           preferences={editorPreferences}
                           onCursorChange={cursor => reportCursor(pane.id, cursor)}
+                          onVimStateChange={reportVimState}
                           onChange={value => handleEditorChange(file.id, value)}
                           onFocus={() => selectPane(pane.id)}
                         />
@@ -1108,7 +1192,7 @@ export default function App() {
       </div>
 
       {/* Command Palette */}
-      <StatusBar cursor={activeCursor} preferences={editorPreferences} lineEnding={activeLineEnding} language={activeTab ? languageName(activeTab.path) : 'No file'} wordWrap={wordWrap} zoom={zoomLevel} theme={theme.name} />
+      <StatusBar cursor={activeCursor} vimStatus={vimStatus} preferences={editorPreferences} lineEnding={activeLineEnding} language={activeTab ? languageName(activeTab.path) : 'No file'} wordWrap={wordWrap} zoom={zoomLevel} theme={theme.name} />
       {isPaletteOpen && (
         <CommandPalette
           commands={commands}

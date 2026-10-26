@@ -6,7 +6,7 @@ import Editor from '../../src/components/Editor.tsx';
 import type { CursorInfo } from '../../src/lib/editor-extensions.ts';
 import { defaultEditorPreferences, type EditorPreferences } from '../../src/lib/preferences.ts';
 import { getTheme } from '../../src/lib/themes.ts';
-import { createVimExtension } from '../../src/lib/vim/extension.ts';
+import { createVimExtension, type VimPublicState } from '../../src/lib/vim/extension.ts';
 import { createVimSession } from '../../src/lib/vim/session.ts';
 
 interface FixtureTab {
@@ -20,6 +20,7 @@ interface FixtureState {
   cursor: CursorInfo;
   preferences: EditorPreferences;
   themeId: string;
+  vimState: VimPublicState | null;
 }
 
 const params = new URLSearchParams(window.location.search);
@@ -35,14 +36,15 @@ function Harness() {
   const [activeTabId, setActiveTabId] = useState('A');
   const [themeId, setThemeId] = useState(params.get('theme') ?? 'crumb');
   const [cursor, setCursor] = useState<CursorInfo>({ line: 1, column: 1, selected: 0 });
+  const [vimState, setVimState] = useState<VimPublicState | null>(null);
   const [preferences, setPreferences] = useState<EditorPreferences>({
     ...defaultEditorPreferences,
     vimModeEnabled: params.get('vim') === '1',
   });
   const [vimSession] = useState(() => createVimSession());
 
-  const stateRef = useRef<FixtureState>({ activeTabId, tabs, cursor, preferences, themeId });
-  stateRef.current = { activeTabId, tabs, cursor, preferences, themeId };
+  const stateRef = useRef<FixtureState>({ activeTabId, tabs, cursor, preferences, themeId, vimState });
+  stateRef.current = { activeTabId, tabs, cursor, preferences, themeId, vimState };
 
   const active = tabs.find(tab => tab.id === activeTabId) ?? tabs[0];
   const theme = getTheme(themeId);
@@ -50,6 +52,10 @@ function Harness() {
   const handleChange = useCallback((value: string) => {
     setTabs(current => current.map(tab => tab.id === activeTabId ? { ...tab, content: value } : tab));
   }, [activeTabId]);
+
+  const handleVimStateChange = useCallback((_paneId: string, next: VimPublicState) => {
+    setVimState(next);
+  }, []);
 
   useEffect(() => {
     vimSession.reconcileDocuments(tabs.map(tab => tab.id));
@@ -71,6 +77,7 @@ function Harness() {
           tabs: Object.fromEntries(current.tabs.map(tab => [tab.id, tab.content])),
           cursor: current.cursor,
           themeId: current.themeId,
+          vimState: current.vimState,
           undoDepth: (() => {
             const currentView = view();
             return currentView ? undoDepth(currentView.state) : -1;
@@ -113,6 +120,7 @@ function Harness() {
         wordWrap={false}
         preferences={preferences}
         onCursorChange={setCursor}
+        onVimStateChange={handleVimStateChange}
         onChange={handleChange}
       />
     </div>

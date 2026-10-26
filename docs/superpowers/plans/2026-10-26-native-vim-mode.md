@@ -217,21 +217,21 @@ Expected: default is off; toggles preserve document/cursor/history; pane mapping
 - Create: `src/lib/vim/shortcuts.ts`, `tests/vim-shortcuts.test.ts`
 - Modify: `src/App.tsx`, `src/components/Editor.tsx`, `src/components/StatusBar.tsx`, `tests/e2e/vim-editor.spec.ts`
 
-- [ ] **Step 1: Write key-ownership policy tests**
+- [x] **Step 1: Write key-ownership policy tests**
 
 Test a pure function with inputs for Vim enabled, editor focus, active dialog/palette/terminal, platform, and Vim mode. Required cases: Ctrl-W/O/B/N/P/J reach Vim only in enabled focused editor contexts; dialogs, command palette, terminal, and ordinary inputs retain ownership; macOS Command shortcuts remain app-owned; `Ctrl-W` never closes a Crumb tab in Vim-controlled contexts; `Tab` is not consumed by `indentWithTab` in Normal/Visual modes but retains Insert-mode indentation behavior.
 
-- [ ] **Step 2: Run tests and confirm missing ownership policy**
+- [x] **Step 2: Run tests and confirm missing ownership policy**
 
 Run `node --test tests/vim-shortcuts.test.ts`.
 
 Expected: tests fail because no Vim ownership predicate exists.
 
-- [ ] **Step 3: Implement the pure ownership policy and integrate capture handler**
+- [x] **Step 3: Implement the pure ownership policy and integrate capture handler**
 
 Add `shouldVimOwnShortcut(input)` in `src/lib/vim/shortcuts.ts`, with a pure input record containing `enabled`, `focusedSurface`, `mode`, `key`, `ctrlKey`, `metaKey`, `altKey`, `shiftKey`, and `mappingOwnsKey`. Return `false` unless Vim is enabled and `focusedSurface === 'editor'`; return `false` for macOS `metaKey` shortcuts unless an explicit Vim mapping owns the key; otherwise return `true` only for a supported built-in Ctrl binding or configured mapping. At the top of `App.tsx`'s capture-phase key handler, before any shortcut branch calls `preventDefault()`/`stopPropagation()`, bypass the conflicting Crumb action only when the policy says the focused Vim editor owns it. Do not forward every event globally into Vim.
 
-- [ ] **Step 4: Feed typed mode state to the existing status bar**
+- [x] **Step 4: Feed typed mode state to the existing status bar**
 
 Pass a typed Vim status snapshot from the active editor through App to `StatusBar`. Render only mode and pending command/count/register state; no duplicate engine mode panel. Route search/command prompts through the package's existing CodeMirror panel.
 

@@ -13,6 +13,7 @@ interface FixtureState {
   themeId: string;
   undoDepth: number;
   mode: string;
+  vimState: { mode: string; pending: string } | null;
 }
 
 async function openEditor(page: Page, options: { a?: string; b?: string; vim?: boolean } = {}): Promise<Locator> {
@@ -222,6 +223,54 @@ test('theme and ordinary preference changes do not reset pending Vim input', asy
 
   await page.keyboard.type('w');
   await expect(editor.locator('.cm-content')).toHaveText('beta gamma');
+});
+
+test('Tab does not run indentWithTab in Normal or Visual mode', async ({ page }) => {
+  await openEditor(page, { a: 'alpha\nbeta', vim: true });
+
+  await page.keyboard.type('gg');
+  await page.keyboard.press('Tab');
+  await expectState(page, { doc: 'alpha\nbeta', mode: 'normal' });
+
+  await page.keyboard.type('V');
+  await expectState(page, { mode: 'visual-line' });
+  await page.keyboard.press('Tab');
+  await expectState(page, { doc: 'alpha\nbeta', mode: 'visual-line' });
+});
+
+test('Tab retains Insert-mode indentation', async ({ page }) => {
+  await openEditor(page, { a: 'alpha', vim: true });
+
+  await page.keyboard.type('gg');
+  await page.keyboard.type('i');
+  await expectState(page, { mode: 'insert' });
+
+  await page.keyboard.press('Tab');
+  await expectState(page, { doc: '  alpha', mode: 'insert' });
+
+  await page.keyboard.type('X');
+  await page.keyboard.press('Escape');
+  await expectState(page, { doc: '  Xalpha', mode: 'normal' });
+});
+
+test('Editor forwards typed Vim mode and pending state updates', async ({ page }) => {
+  await openEditor(page, { a: 'alpha beta', vim: true });
+  await expectState(page, { vimState: { mode: 'normal', pending: '' } });
+
+  await page.keyboard.type('d');
+  await expectState(page, { vimState: { mode: 'normal', pending: 'd' } });
+
+  await page.keyboard.press('Escape');
+  await expectState(page, { vimState: { mode: 'normal', pending: '' } });
+
+  await page.keyboard.type('i');
+  await expectState(page, { vimState: { mode: 'insert', pending: '' } });
+
+  await page.keyboard.press('Escape');
+  await expectState(page, { vimState: { mode: 'normal', pending: '' } });
+
+  await setVimEnabled(page, false);
+  await expectState(page, { vimState: { mode: 'inactive', pending: '' } });
 });
 
 test('repeated Vim toggles do not duplicate the extension or lose history', async ({ page }) => {

@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
-import { EditorView } from '@codemirror/view';
-import { Annotation, Compartment, EditorState, Prec, Transaction } from '@codemirror/state';
+import { EditorView, keymap } from '@codemirror/view';
+import { Annotation, Compartment, EditorState, Prec, Transaction, type Extension } from '@codemirror/state';
 import { javascript } from '@codemirror/lang-javascript';
 import { createSyntaxHighlighting } from '../lib/highlight';
 import { languageForPath } from '../lib/languages';
@@ -8,8 +8,9 @@ import type { Theme } from '../lib/themes';
 import type { EditorPreferences } from '../lib/preferences';
 import { editorCoreExtensions, editorPreferenceExtensions, cursorInfo, type CursorInfo } from '../lib/editor-extensions';
 import { attachScrollSync } from '../lib/scroll-sync';
-import { createVimExtension, type VimExtension } from '../lib/vim/extension';
+import { createVimExtension, type VimExtension, type VimPublicState } from '../lib/vim/extension';
 import { defaultVimConfig, type VimConfig } from '../lib/vim/config';
+import { shouldVimOwnTab } from '../lib/vim/shortcuts';
 import type { VimSession, VimSessionBinding } from '../lib/vim/session';
 
 interface EditorProps {
@@ -29,11 +30,15 @@ interface EditorProps {
   onCursorChange?: (cursor: CursorInfo) => void;
   onChange?: (value: string) => void;
   onFocus?: () => void;
+  /** Typed Vim mode/pending snapshot for the active application status bar. */
+  onVimStateChange?: (paneId: string, state: VimPublicState) => void;
 }
 
 export interface EditorHandle {
   focus: () => void;
   jumpToLine: (line: number) => void;
+  /** Current mode snapshot used by App's capture-phase shortcut policy. */
+  getVimState: () => VimPublicState | null;
 }
 
 const externalDocUpdate = Annotation.define<boolean>();
@@ -69,14 +74,16 @@ function editorAppearance(theme: Theme, fontSize: number, fontFamily: string) {
   }, { dark: theme.dark });
 }
 
-const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, vimSession, tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, preferences, vimConfig = defaultVimConfig, onChange, onCursorChange, onFocus }, ref) {
+const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, vimSession, tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, preferences, vimConfig = defaultVimConfig, onChange, onCursorChange, onFocus, onVimStateChange }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const statesRef = useRef(new Map<string, EditorState>());
   const activeTabRef = useRef(tabId);
   const onChangeRef = useRef(onChange);
   const onCursorChangeRef = useRef(onCursorChange);
+  const onVimStateChangeRef = useRef(onVimStateChange);
   onCursorChangeRef.current = onCursorChange;
+  onVimStateChangeRef.current = onVimStateChange;
 
   // One extension instance per Editor. Engine mappings and registers remain
   // global; the mapping installer is reference-counted across distinct
@@ -85,6 +92,19 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
   if (vimRef.current === null) vimRef.current = createVimExtension(vimConfig);
   const vim = vimRef.current;
 
+  // Vim owns bare Tab in Normal/Visual modes; Insert/Replace must still reach
+  // the ordinary indentWithTab binding. This runs before editorCoreExtensions,
+  // so returning true consumes the key without dispatching a CodeMirror edit.
+  const vimTabGuardRef = useRef<Extension | null>(null);
+  if (vimTabGuardRef.current === null) {
+    const consumeTab = (view: EditorView) => shouldVimOwnTab(vim.getState(view).mode);
+    vimTabGuardRef.current = Prec.highest(keymap.of([
+      { key: 'Tab', run: consumeTab },
+      { key: 'Shift-Tab', run: consumeTab },
+    ]));
+  }
+  const vimTabGuard = vimTabGuardRef.current;
+
   // A dedicated token per Editor instance. Cached tab states carry their own
   // compartment value, so toggling Vim never replaces an EditorState.
   const vimCompartmentRef = useRef<Compartment | null>(null);
@@ -92,6 +112,22 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
   const vimCompartment = vimCompartmentRef.current;
   const vimEnabledRef = useRef(preferences.vimModeEnabled);
   const vimBindingRef = useRef<VimSessionBinding | null>(null);
+  const vimStateSubscriptionRef = useRef<(() => void) | null>(null);
+
+  const reportVimState = () => {
+    const view = viewRef.current;
+    if (view) onVimStateChangeRef.current?.(paneId, vim.getState(view));
+  };
+
+  const subscribeVimState = () => {
+    vimStateSubscriptionRef.current?.();
+    vimStateSubscriptionRef.current = null;
+    const view = viewRef.current;
+    if (!view) return;
+    vimStateSubscriptionRef.current = vim.observeState(view, state => {
+      onVimStateChangeRef.current?.(paneId, state);
+    });
+  };
 
   useImperativeHandle(ref, () => ({
     focus: () => viewRef.current?.focus(),
@@ -107,7 +143,11 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
       });
       view.focus();
     },
-  }), []);
+    getVimState: () => {
+      const view = viewRef.current;
+      return view ? vim.getState(view) : null;
+    },
+  }), [vim]);
 
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
 
@@ -117,6 +157,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
       // The package requires Vim to precede other keymaps so its keydown
       // handler owns Escape before autocomplete/search keymaps see it.
       vimCompartment.of(preferences.vimModeEnabled ? vim.extension : []),
+      vimTabGuard,
       syntaxCompartment.of(Prec.highest(createSyntaxHighlighting(currentTheme))),
       editorCoreExtensions,
       preferencesCompartment.of([editorPreferenceExtensions(preferences), wordWrap ? EditorView.lineWrapping : []]),
@@ -147,11 +188,14 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
     viewRef.current = view;
     statesRef.current.set(tabId, state);
     vimBindingRef.current = vimSession.attachPane(paneId, view, tabId, preferences.vimModeEnabled);
+    subscribeVimState();
     onCursorChangeRef.current?.(cursorInfo(state));
 
     return () => {
       // Finalize/restore session state while the adapter is still alive; the
       // session, not an individual pane, decides when a document has closed.
+      vimStateSubscriptionRef.current?.();
+      vimStateSubscriptionRef.current = null;
       vimBindingRef.current?.detach();
       vimBindingRef.current = null;
       viewRef.current = null;
@@ -187,6 +231,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
 
     binding?.setEnabled(enabled);
     if (enabled) binding?.afterTransition(activeTab);
+    subscribeVimState();
     onCursorChangeRef.current?.(cursorInfo(view.state));
   }, [preferences.vimModeEnabled, vimCompartment, vim]);
 
@@ -230,6 +275,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
       view.setState(target);
       statesRef.current.set(tabId, view.state);
       binding?.afterTransition(tabId);
+      subscribeVimState();
     }
     view.dispatch({
       effects: [
@@ -285,7 +331,10 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
       // steal focus from an open Vim prompt.
       const internal = event.relatedTarget instanceof Node
         && containerRef.current?.contains(event.relatedTarget);
-      if (!internal) vimSession.requestOwner(paneId, { focus: true });
+      if (!internal) {
+        vimSession.requestOwner(paneId, { focus: true });
+        reportVimState();
+      }
       onFocus?.();
     }}
     onBlurCapture={event => {
