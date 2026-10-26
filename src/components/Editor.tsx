@@ -29,6 +29,8 @@ interface EditorProps {
   vimConfig?: VimConfig;
   onCursorChange?: (cursor: CursorInfo) => void;
   onChange?: (value: string) => void;
+  /** Route an argumentless Vim `:w` to Crumb's existing save flow. */
+  onSaveRequest?: (tabId: string) => void;
   onFocus?: () => void;
   /** Typed Vim mode/pending snapshot for the active application status bar. */
   onVimStateChange?: (paneId: string, state: VimPublicState) => void;
@@ -74,7 +76,7 @@ function editorAppearance(theme: Theme, fontSize: number, fontFamily: string) {
   }, { dark: theme.dark });
 }
 
-const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, vimSession, tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, preferences, vimConfig = defaultVimConfig, onChange, onCursorChange, onFocus, onVimStateChange }, ref) {
+const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, vimSession, tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, preferences, vimConfig = defaultVimConfig, onChange, onCursorChange, onSaveRequest, onFocus, onVimStateChange }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const statesRef = useRef(new Map<string, EditorState>());
@@ -82,14 +84,22 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
   const onChangeRef = useRef(onChange);
   const onCursorChangeRef = useRef(onCursorChange);
   const onVimStateChangeRef = useRef(onVimStateChange);
+  const onSaveRequestRef = useRef(onSaveRequest);
   onCursorChangeRef.current = onCursorChange;
   onVimStateChangeRef.current = onVimStateChange;
+  onSaveRequestRef.current = onSaveRequest;
 
   // One extension instance per Editor. Engine mappings and registers remain
   // global; the mapping installer is reference-counted across distinct
-  // instances, which is what makes split panes safe.
+  // instances, which is what makes split panes safe. `:w` captures the
+  // originating tab synchronously; App resolves and reports any later async
+  // save/untitled/error transition against that same tab ID.
   const vimRef = useRef<VimExtension | null>(null);
-  if (vimRef.current === null) vimRef.current = createVimExtension(vimConfig);
+  if (vimRef.current === null) {
+    vimRef.current = createVimExtension(vimConfig, {
+      onWrite: () => onSaveRequestRef.current?.(activeTabRef.current),
+    });
+  }
   const vim = vimRef.current;
 
   // Vim owns bare Tab in Normal/Visual modes; Insert/Replace must still reach

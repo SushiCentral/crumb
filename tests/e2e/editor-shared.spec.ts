@@ -174,23 +174,23 @@ test('mark ownership converges on focus transfer and the latest writer wins', as
   await openWorkspace(page, { mode: 'shared', a: 'alpha beta gamma', b: 'other', vim: true });
 
   await focusPane(page, 'A');
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('w');
   await page.keyboard.type('ma');
   await expectCursor(page, 'A', 7);
 
   await focusPane(page, 'B');
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('`a');
   await expectCursor(page, 'B', 7);
 
   await focusPane(page, 'A');
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('w');
   await page.keyboard.type('w');
   await page.keyboard.type('ma');
   await focusPane(page, 'B');
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('`a');
   await expectCursor(page, 'B', 12);
 });
@@ -199,7 +199,7 @@ test('unmounting the owner captures repeat and marks for the surviving peer', as
   await openWorkspace(page, { mode: 'shared', a: 'one two three', b: 'other', vim: true });
 
   await focusPane(page, 'A');
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('x');
   await page.keyboard.type('w');
   await page.keyboard.type('ma');
@@ -210,11 +210,11 @@ test('unmounting the owner captures repeat and marks for the surviving peer', as
   await focusPane(page, 'B');
   await expectState(page, 'B', { mode: 'normal', doc: 'ne two three' });
 
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('`a');
   await expectCursor(page, 'B', 4);
 
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('.');
   await expectState(page, 'B', { doc: 'e two three' });
 });
@@ -335,7 +335,7 @@ test('same-document panes converge marks on transfer with deterministic latest-w
   await openWorkspace(page, { mode: 'shared', a: 'alpha beta gamma', b: 'other', vim: true });
 
   await focusPane(page, 'A');
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('rZ');
   await page.keyboard.type('w');
   await page.keyboard.type('ma');
@@ -347,13 +347,13 @@ test('same-document panes converge marks on transfer with deterministic latest-w
   // The first ownership transfer restores both marks and repeat into B.
   await focusPane(page, 'B');
   await expectState(page, 'B', { doc: 'Zlpha beta gamma' });
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('l');
   await page.keyboard.type('.');
   await expectState(page, 'B', { doc: 'ZZpha beta gamma' });
 
   // B now writes a conflicting a mark at the start.
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('ma');
   await expectCursor(page, 'B', 1);
 
@@ -367,26 +367,26 @@ test('same-document panes converge marks on transfer with deterministic latest-w
   // b exists only in pane A. The document-owned snapshot retains it while B's
   // later command owns the conflicting a position.
   await focusPane(page, 'A');
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('`b');
   await expectCursor(page, 'A', 12);
 
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('`a');
   await expectCursor(page, 'A', 1);
 
   await focusPane(page, 'B');
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('`a');
   await expectCursor(page, 'B', 1);
 
   // Reverse writer order: A becomes the latest writer of a.
   await focusPane(page, 'A');
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('w');
   await page.keyboard.type('ma');
   await focusPane(page, 'B');
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('`a');
   await expectCursor(page, 'B', 7);
 });

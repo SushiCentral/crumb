@@ -250,27 +250,29 @@ Expected: all shortcut and focus-context cases pass.
 - Create: `tests/vim-semantics.test.ts`
 - Modify: `tests/e2e/vim-editor.spec.ts`
 
-- [ ] **Step 1: Add failing semantic fixtures**
+- [x] **Step 1: Add failing semantic fixtures**
 
 Add cases for `Y` → `y$`; Neovim `startofline`; Visual `.` behavior; case-sensitive `/` and `?`; `n/N`; counts and count multiplication; register kinds; and transient command reset. For search, verify case distinction and basic literals/classes/groups/escaping without claiming full Vim-regex parity.
 
-- [ ] **Step 2: Compare behavior to a pinned Neovim oracle**
+- [x] **Step 2: Compare behavior to a pinned Neovim oracle**
 
 Run the fixture sequences with Neovim only in developer/test environments using `--clean`; capture expected document, cursor, mode, selection shape, register type, and undo results. Store recordings as plain fixtures so normal tests do not require Neovim.
 
-- [ ] **Step 3: Correct package defaults through the narrow module adapter**
+- [x] **Step 3: Correct package defaults through the narrow module adapter**
 
 Set supported package options and Crumb mappings centrally. Add narrow overrides for `Y`, case-sensitive search, Neovim cursor placement, and Neovim Visual repeat where package APIs permit. Do not alter the user's system configuration and do not make Neovim a runtime or CI requirement. If an override needs a substantial engine change, stop for approval.
 
-- [ ] **Step 4: Route `:w` to Crumb save**
+- [x] **Step 4: Route `:w` to Crumb save**
 
 Connect the engine's argumentless write command to the active tab's existing `handleSaveFile` path. Preserve untitled-file save dialogs, dirty state, and failure toasts. Do not add `:q`, `:wq`, file arguments, ranges, or shell commands. Ensure an asynchronous save cannot target a tab that ceased to be active before the command resolves; capture the originating tab ID and report errors to that tab's flow.
 
-- [ ] **Step 5: Verify save and semantics**
+- [x] **Step 5: Verify save and semantics**
 
 Run `node --test tests/vim-semantics.test.ts` and `npm run test:e2e -- --project=chromium`.
 
 Expected: fixtures match the selected Neovim defaults in the agreed contract; `:w` saves the correct tab and failure paths remain visible; unsupported Ex commands do not trigger Crumb actions.
+
+**Accepted pinned-engine differences to document in Task 7:** linewise-operator cursor placement after `nostartofline` motions; multiline characterwise Visual repeat; and short-row Visual-block register/cursor results. Each has an explicit Neovim 0.12.6 oracle case and a skipped browser parity assertion; no engine fork/operator replacement was approved.
 
 ### Task 7: Complete documentation, integration tests, and final verification
 

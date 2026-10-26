@@ -53,7 +53,7 @@ async function switchTab(page: Page, id: string): Promise<void> {
 }
 
 async function moveToStart(page: Page, vim: boolean): Promise<void> {
-  if (vim) await page.keyboard.type('gg');
+  if (vim) await page.keyboard.type('gg0');
   else await page.keyboard.press('Control+Home');
 }
 
@@ -85,7 +85,7 @@ test('enabling Vim preserves the document, cursor, and CodeMirror history', asyn
     undoDepth: beforeToggle.undoDepth,
   });
 
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('iZ');
   await page.keyboard.press('Escape');
   await expect(editor.locator('.cm-content')).toHaveText('ZalphaX');
@@ -137,14 +137,14 @@ test('switching tabs cancels transient input, starts in Normal, and isolates sta
   await page.keyboard.type('w');
   await expectState(page, { doc: 'one two' });
 
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('iZ');
   await page.keyboard.press('Escape');
   await expect(editor.locator('.cm-content')).toHaveText('Zone two');
 
   await switchTab(page, 'A');
   await expectState(page, { activeTabId: 'A', mode: 'normal', doc: 'alpha beta' });
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('x');
   await expect(editor.locator('.cm-content')).toHaveText('lpha beta');
   await expectState(page, { tabs: { A: 'lpha beta', B: 'Zone two' } });
@@ -204,7 +204,7 @@ test('ordinary edits while Vim is disabled invalidate stale mark positions', asy
 
   await setVimEnabled(page, true);
   await expectState(page, { mode: 'normal' });
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('`a');
   await expectState(page, { cursor: { line: 1, column: 1, selected: 0 } });
 });

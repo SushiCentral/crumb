@@ -37,6 +37,18 @@ export interface VimPublicState {
   readonly pending: string;
 }
 
+export type VimWriteHandler = () => void;
+
+export interface VimRegisterSnapshot {
+  readonly text: string;
+  readonly linewise: boolean;
+  readonly blockwise: boolean;
+}
+
+interface VimWriteAdapter extends CodeMirror {
+  __crumbVimWrite?: VimWriteHandler;
+}
+
 interface SearchSnapshot {
   query: unknown;
   reversed: boolean;
@@ -72,6 +84,33 @@ export interface VimAdapterCapture {
 
 export type VimRestoreResult = 'applied' | 'stale' | 'unavailable';
 
+/**
+ * The engine's public `pcre=false` option translates Vim regex syntax once,
+ * natively. This adapter only removes the engine's proactive `ignorecase`
+ * flag so Neovim's default case-sensitive search is preserved. Callers must
+ * not translate the source again.
+ */
+export function makeCaseSensitiveVimQuery(query: RegExp): RegExp {
+  return new RegExp(query.source, query.flags.replace(/i/g, ''));
+}
+
+/**
+ * Neovim's default `nostartofline` preserves the goal column for `gg`, `G`,
+ * `H`, `M`, and `L`. The package always jumps to the first non-blank. The
+ * engine stores the goal column in `lastHPos`; `Infinity` means the `$`
+ * column (the last character of a non-empty line).
+ */
+export function neovimStartoflineColumn(
+  lastHPos: number | undefined,
+  currentColumn: number,
+  lineLength: number,
+): number {
+  const lastCharacter = Math.max(0, lineLength - 1);
+  if (lastHPos === Infinity) return lastCharacter;
+  const goal = lastHPos === undefined ? currentColumn : lastHPos;
+  return Math.min(Math.max(0, goal), lastCharacter);
+}
+
 // Search query and direction live in the engine singleton. `/` and `?` mutate
 // the direction as soon as the prompt opens, and the incremental query update
 // mutates the query/register on every keystroke. Remember the committed
@@ -82,6 +121,7 @@ const patchedAdapters = new WeakSet<CodeMirror>();
 const overlaySweeps = new WeakMap<CodeMirror, ReturnType<typeof setTimeout>>();
 let searchDirectionCaptureInstalled = false;
 let searchActionCaptureInstalled = false;
+let startoflineCaptureInstalled = false;
 
 function cancelOverlaySweep(cm: CodeMirror): void {
   const timer = overlaySweeps.get(cm);
@@ -105,10 +145,13 @@ function sweepCancelledSearchOverlay(cm: CodeMirror, cancelledQuery: QuerySignat
     if (!cm.state.vim) return;
     const searchState = cm.state.vim.searchState_;
     const overlay = searchState?.getOverlay();
-    // If a later search has already painted a different query, keep it.
+    // If a later search has already painted a different query, keep it. The
+    // overlay owns the engine's raw query; compare it after applying the same
+    // case-sensitivity/translation normalization as the cancellation snapshot.
+    const overlayQuery = querySignature(overlay?.query);
     if (
-      overlay && cancelledQuery &&
-      (overlay.query.source !== cancelledQuery.source || overlay.query.flags !== cancelledQuery.flags)
+      overlay && cancelledQuery && overlayQuery &&
+      (overlayQuery.source !== cancelledQuery.source || overlayQuery.flags !== cancelledQuery.flags)
     ) return;
     searchState?.setOverlay(null);
     cm.removeOverlay();
@@ -117,7 +160,9 @@ function sweepCancelledSearchOverlay(cm: CodeMirror, cancelledQuery: QuerySignat
 }
 
 function querySignature(query: unknown): QuerySignature | undefined {
-  return query instanceof RegExp ? { source: query.source, flags: query.flags } : undefined;
+  if (!(query instanceof RegExp)) return undefined;
+  const normalized = makeCaseSensitiveVimQuery(query);
+  return { source: normalized.source, flags: normalized.flags };
 }
 
 /**
@@ -179,6 +224,235 @@ function installSearchActionCapture(): void {
   }) as typeof Vim.handleKey;
 }
 
+const STARTOFLINE_MOTIONS = new Set([
+  'moveToTopLine',
+  'moveToMiddleLine',
+  'moveToBottomLine',
+  'moveToLineOrEdgeOfDocument',
+]);
+
+// Vertical motions keep the Vim goal column even when a short line clips the
+// cursor. Display/page/scroll motions must keep the package's own visual
+// movement unless they are one of the line-jump motions corrected below.
+const GOAL_PRESERVING_MOTIONS = new Set([
+  ...STARTOFLINE_MOTIONS,
+  'moveByLines',
+  'moveByDisplayLines',
+  'moveByPage',
+  'moveByScroll',
+]);
+
+// Only line jumps (and `j`/`k`, whose package path can discard the goal after
+// a short-line jump) get an explicit cursor correction. `gj`, Ctrl-D, Ctrl-F,
+// and Ctrl-B retain their native wrapped-line/scroll semantics.
+const GOAL_CORRECTION_MOTIONS = new Set([
+  ...STARTOFLINE_MOTIONS,
+  'moveByLines',
+]);
+
+// Display/scroll/page motions must not rewrite the native cursor, but their
+// landing column becomes the new logical goal for a following G/gg/j/k.
+const DISPLAY_GOAL_MOTIONS = new Set([
+  'moveByDisplayLines',
+  'moveByScroll',
+  'moveByPage',
+]);
+
+type VimGoalColumn = number | 'eol';
+const vimGoalColumns = new WeakMap<CodeMirror, VimGoalColumn>();
+
+function positionBefore(a: VimSearchPos, b: VimSearchPos): boolean {
+  return a.line < b.line || (a.line === b.line && a.ch < b.ch);
+}
+
+function offsetPosition(pos: VimSearchPos, offset: number): VimSearchPos {
+  return offset === 0 ? pos : { line: pos.line, ch: pos.ch + offset };
+}
+
+/**
+ * Programmatic Visual range updates must look like Vim operations. Otherwise
+ * the engine's cursor-activity handler treats the primary CodeMirror range as
+ * an external mouse selection and overwrites `vim.sel` (which breaks block
+ * operator rectangles).
+ */
+function applyVisualSelection(adapter: CodeMirror, apply: () => void): void {
+  const operationAdapter = adapter as unknown as {
+    curOp?: { isVimOp?: boolean };
+    operation: (callback: () => void, force?: boolean) => unknown;
+  };
+  const run = () => {
+    if (operationAdapter.curOp) operationAdapter.curOp.isVimOp = true;
+    apply();
+  };
+  if (!operationAdapter.curOp) {
+    operationAdapter.operation(run, true);
+    return;
+  }
+  const previous = operationAdapter.curOp.isVimOp;
+  run();
+  if (operationAdapter.curOp) operationAdapter.curOp.isVimOp = previous;
+}
+
+/** Keep the engine's selected range coherent after a Visual goal-column jump. */
+function updateVisualGoal(adapter: CodeMirror, vim: vimState, line: number, targetCh: number): void {
+  if (!vim.sel) return;
+  const anchor = vim.sel.anchor;
+  const head = { line, ch: targetCh };
+  vim.sel.head = head;
+
+  if (vim.visualBlock) {
+    const top = Math.min(anchor.line, head.line);
+    const bottom = Math.max(anchor.line, head.line);
+    let fromCh = anchor.ch;
+    let toCh = head.ch;
+    if (fromCh < toCh) toCh += 1;
+    else fromCh += 1;
+    const ranges: Array<{ anchor: VimSearchPos; head: VimSearchPos }> = [];
+    for (let current = top; current <= bottom; current += 1) {
+      ranges.push({
+        anchor: { line: current, ch: fromCh },
+        head: { line: current, ch: toCh },
+      });
+    }
+    applyVisualSelection(adapter, () => {
+      adapter.setSelections(ranges, head.line === top ? 0 : ranges.length - 1);
+    });
+    return;
+  }
+
+  if (vim.visualLine) {
+    applyVisualSelection(adapter, () => {
+      if (!positionBefore(head, anchor)) {
+        adapter.setSelection(
+          { line: anchor.line, ch: 0 },
+          { line: head.line, ch: adapter.getLine(head.line).length },
+        );
+      } else {
+        adapter.setSelection(
+          { line: anchor.line, ch: adapter.getLine(anchor.line).length },
+          { line: head.line, ch: 0 },
+        );
+      }
+    });
+    return;
+  }
+
+  const headOffset = !positionBefore(head, anchor) ? 1 : 0;
+  const anchorOffset = positionBefore(head, anchor) ? 1 : 0;
+  applyVisualSelection(adapter, () => {
+    adapter.setSelection(
+      offsetPosition(anchor, anchorOffset),
+      offsetPosition(head, headOffset),
+    );
+  });
+}
+
+function refreshGoalFromCursor(cm: CodeMirror): void {
+  const vim = cm.state.vim;
+  const position = vim?.visualMode && vim.sel ? vim.sel.head : cm.getCursor();
+  vimGoalColumns.set(cm, position.ch);
+}
+
+/**
+ * Track host mouse selection without leaving a listener/timer behind when the
+ * Vim adapter is destroyed or recreated on the same EditorView.
+ */
+export function createMouseGoalRefresh(target: EventTarget, refresh: () => void): () => void {
+  let pending: ReturnType<typeof setTimeout> | null = null;
+  const onMouseUp = () => {
+    refresh();
+    if (pending !== null) clearTimeout(pending);
+    // CodeMirror can finish mapping the mouse position on the next task.
+    pending = setTimeout(() => {
+      pending = null;
+      refresh();
+    }, 0);
+  };
+  target.addEventListener('mouseup', onMouseUp);
+  return () => {
+    target.removeEventListener('mouseup', onMouseUp);
+    if (pending !== null) {
+      clearTimeout(pending);
+      pending = null;
+    }
+  };
+}
+
+/**
+ * Neovim defaults to `nostartofline`. The package's `gg`, `G`, `H`, `M`, and
+ * `L` always go to the first non-blank, so preserve a persistent goal column
+ * across those motions. The goal survives short lines and `$` (end-of-line)
+ * goals, and is applied to charwise/linewise/blockwise Visual heads as well.
+ *
+ * BLOCKED: full Neovim `nostartofline` parity for built-in linewise operators
+ * (`dG`, `cG`, `yG`, indent, and related forms) needs the package's operator
+ * implementations replaced. That exceeds this narrow adapter boundary and is
+ * intentionally not attempted here.
+ */
+function installStartoflineCapture(): void {
+  if (startoflineCaptureInstalled) return;
+  startoflineCaptureInstalled = true;
+
+  const original = Vim.handleKey;
+  Vim.handleKey = ((cm, key, origin) => {
+    const adapter = cm as unknown as CodeMirror;
+    const before = adapter.state.vim;
+    const beforeCursor = adapter.getCursor();
+    const previousMotion = before?.lastMotion?.name;
+    const goal = vimGoalColumns.get(adapter) ?? beforeCursor.ch;
+
+    // handleKey() uses `this.findKey`, so preserve the engine receiver.
+    const result = original.call(Vim, cm, key, origin);
+
+    const after = adapter.state.vim;
+    if (!after) return result;
+    const cursor = adapter.getCursor();
+    const motionName = after.lastMotion?.name;
+    const targetMotion = motionName !== undefined && GOAL_CORRECTION_MOTIONS.has(motionName);
+    const executedTarget = targetMotion && (
+      motionName !== previousMotion ||
+      cursor.line !== beforeCursor.line ||
+      cursor.ch !== beforeCursor.ch
+    );
+
+    if (executedTarget && !after.insertMode) {
+      const lineLength = adapter.getLine(cursor.line).length;
+      const target = neovimStartoflineColumn(
+        goal === 'eol' ? Infinity : goal,
+        beforeCursor.ch,
+        lineLength,
+      );
+      if (after.visualMode) {
+        updateVisualGoal(adapter, after, cursor.line, target);
+      } else if (target !== cursor.ch) {
+        adapter.setCursor({ line: cursor.line, ch: target });
+      }
+      after.lastHPos = goal === 'eol' ? Infinity : goal;
+      vimGoalColumns.set(adapter, goal);
+      return result;
+    }
+
+    let nextGoal = goal;
+    // CodeMirror's charwise Visual head is exclusive; Vim's goal is the
+    // semantic head character.
+    const goalCursor = after.visualMode && after.sel ? after.sel.head : cursor;
+    if (motionName && DISPLAY_GOAL_MOTIONS.has(motionName)) {
+      // Keep the native display/scroll/page landing position, but synchronize
+      // the logical column cache so a later G/gg does not reuse a stale column.
+      nextGoal = goalCursor.ch;
+    } else if (!motionName || !GOAL_PRESERVING_MOTIONS.has(motionName)) {
+      if (motionName === 'moveToColumn' && typeof after.lastHPos === 'number') {
+        // `10|` sets a numeric goal even when a short line clips the cursor.
+        nextGoal = after.lastHPos;
+      } else {
+        nextGoal = motionName === 'moveToEol' ? 'eol' : goalCursor.ch;
+      }
+    }
+    vimGoalColumns.set(adapter, nextGoal);
+    return result;
+  }) as typeof Vim.handleKey;
+}
+
 function adapterVimState(view: EditorView): vimState | null {
   const cm = getCM(view);
   // `state.vim` is not a stable public API; it is the adapter state this
@@ -228,6 +502,63 @@ function restoreSearchSnapshot(cm: CodeMirror, snapshot: SearchSnapshot, cancell
   sweepCancelledSearchOverlay(cm, cancelledQuery);
 }
 
+interface VimSearchPos {
+  line: number;
+  ch: number;
+}
+
+type VimSearchCursor = ReturnType<CodeMirror['getSearchCursor']>;
+
+/**
+ * The package's backward cursor excludes a match that overlaps the starting
+ * cursor. Neovim includes the match the cursor is inside (except at its start).
+ * Reposition a cursor onto that containing match during its first backward
+ * step. Doing this at the cursor layer preserves counts, operators, and Visual
+ * ranges because the engine's own motion/operator code sees the corrected
+ * match before it acts. The prompt callback is not post-corrected.
+ */
+function positionAtContainingMatch(
+  cm: CodeMirror,
+  getCursor: (query: RegExp, pos: VimSearchPos) => VimSearchCursor,
+  query: RegExp,
+  pos: VimSearchPos,
+): VimSearchCursor | null {
+  const origin = cm.indexFromPos(pos);
+  const probe = getCursor(query, { line: 0, ch: 0 });
+  let targetFrom: number | null = null;
+  let targetTo: number | null = null;
+
+  while (probe.findNext()) {
+    const from = probe.from();
+    const to = probe.to();
+    if (!from || !to) continue;
+    const fromOffset = cm.indexFromPos(from);
+    const toOffset = cm.indexFromPos(to);
+    if (fromOffset > origin) break;
+    if (fromOffset < origin && origin <= toOffset) {
+      targetFrom = fromOffset;
+      targetTo = toOffset;
+      break;
+    }
+  }
+
+  if (targetFrom === null || targetTo === null) return null;
+
+  const positioned = getCursor(query, { line: 0, ch: 0 });
+  while (positioned.findNext()) {
+    const from = positioned.from();
+    const to = positioned.to();
+    if (
+      from && to &&
+      cm.indexFromPos(from) === targetFrom &&
+      cm.indexFromPos(to) === targetTo
+    ) {
+      return positioned;
+    }
+  }
+  return null;
+}
+
 /**
  * The stock prompt opens with `showPrompt()` passing the commit callback as the
  * second argument and an options object as the third. `openDialog` calls the
@@ -236,13 +567,61 @@ function restoreSearchSnapshot(cm: CodeMirror, snapshot: SearchSnapshot, cancell
  * committed search (second callback invoked with a string) from Escape, blur,
  * or programmatic cancellation (dialog close with no commit).
  */
-export function patchVimAdapter(view: EditorView): void {
+export function patchVimAdapter(
+  view: EditorView,
+  write?: VimWriteHandler,
+): (() => void) | null {
   const cm = getCM(view);
-  if (!cm || patchedAdapters.has(cm)) return;
+  if (!cm) return null;
+  if (write) (cm as VimWriteAdapter).__crumbVimWrite = write;
+  if (patchedAdapters.has(cm)) return null;
   patchedAdapters.add(cm);
   syncCommittedSearchDirection();
   installSearchDirectionCapture();
   installSearchActionCapture();
+  installStartoflineCapture();
+  const cleanupMouseGoal = createMouseGoalRefresh(
+    view.contentDOM,
+    () => refreshGoalFromCursor(cm),
+  );
+
+  // Engine search is case-insensitive/smart-case and (with pcre=false)
+  // already translates Vim regex syntax natively. Keep the committed query raw
+  // and normalize only the case flag at the search/overlay boundaries.
+  const originalGetSearchCursor = cm.getSearchCursor.bind(cm);
+  cm.getSearchCursor = ((query: RegExp, pos: VimSearchPos) => {
+    const normalized = makeCaseSensitiveVimQuery(query);
+    const initial = originalGetSearchCursor(normalized, pos);
+    let active = initial;
+    let firstFind = true;
+
+    const find = (back?: boolean): boolean | string[] | null | undefined => {
+      if (!firstFind) return active.find(back);
+      firstFind = false;
+      if (!back) return active.find(back);
+      const containing = positionAtContainingMatch(cm, originalGetSearchCursor, normalized, pos);
+      if (!containing) return active.find(back);
+      active = containing;
+      return active.match;
+    };
+
+    return {
+      findNext: () => find(false),
+      findPrevious: () => find(true),
+      find,
+      from: () => active.from(),
+      to: () => active.to(),
+      replace: (text: string) => active.replace(text),
+      get match() { return active.match; },
+    } as VimSearchCursor;
+  }) as typeof cm.getSearchCursor;
+  const originalAddOverlay = cm.addOverlay.bind(cm);
+  cm.addOverlay = ((overlay: { query?: RegExp }) => {
+    if (overlay?.query instanceof RegExp) {
+      return originalAddOverlay({ ...overlay, query: makeCaseSensitiveVimQuery(overlay.query) });
+    }
+    return originalAddOverlay(overlay as Parameters<typeof originalAddOverlay>[0]);
+  }) as typeof cm.addOverlay;
 
   const originalOpenDialog = cm.openDialog.bind(cm) as (
     template: Element,
@@ -268,6 +647,7 @@ export function patchVimAdapter(view: EditorView): void {
             committed = true;
             committedSearchDirection = prefix === '?';
             cancelOverlaySweep(cm);
+            refreshGoalFromCursor(cm);
           }
           return result;
         }
@@ -299,6 +679,8 @@ export function patchVimAdapter(view: EditorView): void {
 
     return originalOpenDialog(template, wrappedCallback, patchedOptions);
   }) as typeof cm.openDialog;
+
+  return cleanupMouseGoal;
 }
 
 function clearEngineInput(cm: CodeMirror): void {
@@ -322,6 +704,20 @@ function resetPendingInput(cm: CodeMirror): void {
   vim.expectLiteralNext = false;
   vim.status = '';
   cm.signal('vim-command-done', undefined);
+}
+
+export function getVimRegister(view: EditorView, name = '"'): VimRegisterSnapshot | null {
+  if (!getCM(view)) return null;
+  const register = Vim.getRegisterController().getRegister(name) as {
+    toString(): string;
+    linewise?: boolean;
+    blockwise?: boolean;
+  };
+  return {
+    text: register.toString(),
+    linewise: Boolean(register.linewise),
+    blockwise: Boolean(register.blockwise),
+  };
 }
 
 export function getVimPublicState(view: EditorView): VimPublicState {

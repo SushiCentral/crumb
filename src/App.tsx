@@ -1111,6 +1111,7 @@ export default function App() {
                           onCursorChange={cursor => reportCursor(pane.id, cursor)}
                           onVimStateChange={reportVimState}
                           onChange={value => handleEditorChange(file.id, value)}
+                          onSaveRequest={tabId => { void handleSaveFile(tabId); }}
                           onFocus={() => selectPane(pane.id)}
                         />
                       </div>

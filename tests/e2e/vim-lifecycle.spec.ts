@@ -379,12 +379,12 @@ test('local marks survive A -> B -> A using fresh adapter-bound markers', async 
   await switchTo(page, 'B');
   await switchTo(page, 'A');
 
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('iXX');
   await page.keyboard.press('Escape');
   expect((await state(page)).doc).toBe('XXalpha beta gamma');
 
-  await page.keyboard.type('gg');
+  await page.keyboard.type('gg0');
   await page.keyboard.type('`a');
   await expectCursor(page, 8);
 });
