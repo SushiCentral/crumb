@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { inflateSync } from 'node:zlib';
 
 // These tests mount the real `Editor` component in React with its normal
 // preference props. The fixture does not use Tauri APIs.
@@ -55,6 +56,96 @@ async function switchTab(page: Page, id: string): Promise<void> {
 async function moveToStart(page: Page, vim: boolean): Promise<void> {
   if (vim) await page.keyboard.type('gg0');
   else await page.keyboard.press('Control+Home');
+}
+
+interface DecodedImage {
+  width: number;
+  height: number;
+  channels: number;
+  data: Buffer;
+}
+
+// Playwright has no pixel API, so decode its PNG screenshot directly. The
+// renderer emits 8-bit RGB/RGBA, which keeps the unfiltering below small.
+function decodePng(buffer: Buffer): DecodedImage {
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let channels = 0;
+  const parts: Buffer[] = [];
+  while (offset < buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const kind = buffer.toString('ascii', offset + 4, offset + 8);
+    const data = buffer.subarray(offset + 8, offset + 8 + length);
+    if (kind === 'IHDR') {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      const bitDepth = data[8];
+      const colorType = data[9];
+      if (bitDepth !== 8 || (colorType !== 2 && colorType !== 6)) {
+        throw new Error(`Unsupported PNG format (depth ${bitDepth}, color ${colorType})`);
+      }
+      channels = colorType === 6 ? 4 : 3;
+    } else if (kind === 'IDAT') {
+      parts.push(data);
+    } else if (kind === 'IEND') {
+      break;
+    }
+    offset += 12 + length;
+  }
+
+  const stride = width * channels;
+  const raw = inflateSync(Buffer.concat(parts));
+  const data = Buffer.alloc(stride * height);
+  let source = 0;
+  for (let row = 0; row < height; row += 1) {
+    const filter = raw[source];
+    source += 1;
+    const target = row * stride;
+    const previous = target - stride;
+    for (let column = 0; column < stride; column += 1) {
+      const value = raw[source + column];
+      const left = column >= channels ? data[target + column - channels] : 0;
+      const up = row > 0 ? data[previous + column] : 0;
+      const upLeft = row > 0 && column >= channels ? data[previous + column - channels] : 0;
+      let predictor = 0;
+      if (filter === 1) {
+        predictor = left;
+      } else if (filter === 2) {
+        predictor = up;
+      } else if (filter === 3) {
+        predictor = Math.floor((left + up) / 2);
+      } else if (filter === 4) {
+        const estimate = left + up - upLeft;
+        const toLeft = Math.abs(estimate - left);
+        const toUp = Math.abs(estimate - up);
+        const toUpLeft = Math.abs(estimate - upLeft);
+        predictor = toLeft <= toUp && toLeft <= toUpLeft ? left : toUp <= toUpLeft ? up : upLeft;
+      } else if (filter !== 0) {
+        throw new Error(`Unsupported PNG filter ${filter}`);
+      }
+      data[target + column] = (value + predictor) & 0xff;
+    }
+    source += stride;
+  }
+  return { width, height, channels, data };
+}
+
+function pixelAt(image: DecodedImage, x: number, y: number): number[] {
+  const index = (y * image.width + x) * image.channels;
+  return Array.from(image.data.subarray(index, index + 3));
+}
+
+function rgbFromHex(value: string): number[] {
+  const hex = value.replace(/^#/, '');
+  const expanded = hex.length === 3 ? Array.from(hex, digit => digit + digit).join('') : hex;
+  return [0, 2, 4].map(index => Number.parseInt(expanded.slice(index, index + 2), 16));
+}
+
+function expectColorClose(actual: number[], expected: number[]): void {
+  for (let channel = 0; channel < 3; channel += 1) {
+    expect(Math.abs(actual[channel] - expected[channel])).toBeLessThanOrEqual(2);
+  }
 }
 
 test('Vim is off by default and ordinary typing is unchanged', async ({ page }) => {
@@ -281,6 +372,42 @@ test('theme and ordinary preference changes do not reset pending Vim input', asy
 
   await page.keyboard.type('w');
   await expect(editor.locator('.cm-content')).toHaveText('beta gamma');
+});
+
+test('selected text paints above the active-line background while the rest of the line stays highlighted', async ({ page }) => {
+  const editor = await openEditor(page, { a: '                    \nsecond line' });
+
+  // Select ten spaces in the middle of the active line. Spaces avoid glyph
+  // pixels at the sampled points.
+  await page.keyboard.press('Control+Home');
+  for (let index = 0; index < 5; index += 1) await page.keyboard.press('ArrowRight');
+  for (let index = 0; index < 10; index += 1) await page.keyboard.press('Shift+ArrowRight');
+  await expectState(page, { cursor: { line: 1, column: 16, selected: 10 } });
+
+  const selection = editor.locator('.cm-selectionBackground');
+  await expect(selection).toHaveCount(1);
+  const box = await selection.boundingBox();
+  expect(box).not.toBeNull();
+
+  // Read the fixture's production theme variables rather than synthetic colors.
+  const colors = await editor.evaluate(element => {
+    const style = getComputedStyle(element);
+    return {
+      selection: style.getPropertyValue('--selection').trim(),
+      activeLine: style.getPropertyValue('--active-line').trim(),
+    };
+  });
+  const selectionColor = rgbFromHex(colors.selection);
+  const activeLineColor = rgbFromHex(colors.activeLine);
+  expect(selectionColor).not.toEqual(activeLineColor);
+
+  const screenshot = decodePng(await page.screenshot());
+  const middleY = Math.round(box!.y + box!.height / 2);
+  const selectedPixel = pixelAt(screenshot, Math.round(box!.x + box!.width / 2), middleY);
+  const activeLinePixel = pixelAt(screenshot, Math.round(box!.x - 8), middleY);
+
+  expectColorClose(selectedPixel, selectionColor);
+  expectColorClose(activeLinePixel, activeLineColor);
 });
 
 test('Tab does not run indentWithTab in Normal or Visual mode', async ({ page }) => {

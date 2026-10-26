@@ -6,7 +6,7 @@ import { undoDepth } from '@codemirror/commands';
 import Editor from '../../src/components/Editor.tsx';
 import type { CursorInfo } from '../../src/lib/editor-extensions.ts';
 import { defaultEditorPreferences, type EditorPreferences } from '../../src/lib/preferences.ts';
-import { getTheme } from '../../src/lib/themes.ts';
+import { getTheme, themeVariables } from '../../src/lib/themes.ts';
 import { createVimExtension, type VimPublicState } from '../../src/lib/vim/extension.ts';
 import { createVimSession } from '../../src/lib/vim/session.ts';
 
@@ -107,7 +107,7 @@ function Harness() {
       placeholder="external control"
       style={{ position: 'absolute', top: 0, right: 0, zIndex: 2 }}
     />
-    <div data-testid="code-editor">
+    <div data-testid="code-editor" style={themeVariables(theme, theme.codeFont)}>
       <Editor
         paneId="A"
         vimSession={vimSession}

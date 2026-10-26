@@ -64,7 +64,20 @@ function editorAppearance(theme: Theme, fontSize: number, fontFamily: string) {
       color: 'var(--gutter)', paddingRight: '12px',
     },
     '.cm-activeLineGutter': { backgroundColor: 'var(--active-line)', color: 'var(--text)' },
-    '.cm-activeLine': { backgroundColor: 'var(--active-line)' },
+    // CodeMirror draws the selection in a negative-z layer below the text, so
+    // a plain background on the active line would paint over it. Keep the line
+    // itself transparent and put its highlight in a pseudo-element below the
+    // selection layer (including its additional drop-cursor layer) but still
+    // above the editor background. Text remains above both.
+    '.cm-activeLine': { backgroundColor: 'transparent', position: 'relative' },
+    '.cm-activeLine::before': {
+      content: '""',
+      position: 'absolute',
+      inset: '0',
+      zIndex: '-999',
+      backgroundColor: 'var(--active-line)',
+      pointerEvents: 'none',
+    },
     '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
       backgroundColor: 'var(--selection) !important',
     },

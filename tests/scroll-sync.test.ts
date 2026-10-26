@@ -9,14 +9,24 @@ type Handler = (event?: unknown) => void;
 function fakeScroller(content: number, viewport: number) {
   const listeners = new Map<string, Set<Handler>>();
   let offset = 0;
+  let pendingEmit = false;
   const emit = () => { for (const handler of Array.from(listeners.get('scroll') ?? [])) handler(); };
+  // Browsers coalesce multiple scrollTop writes into one scroll event.
+  const scheduleEmit = () => {
+    if (pendingEmit) return;
+    pendingEmit = true;
+    queueMicrotask(() => {
+      pendingEmit = false;
+      emit();
+    });
+  };
   const el = {
     scrollHeight: content,
     clientHeight: viewport,
     get scrollTop() { return offset; },
     set scrollTop(value: number) {
-      offset = value;
-      queueMicrotask(emit);
+      offset = Math.max(0, Math.min(content - viewport, value));
+      scheduleEmit();
     },
     addEventListener(kind: string, handler: Handler) {
       const set = listeners.get(kind) ?? new Set();
@@ -74,13 +84,13 @@ test('user scrolls move peer elements without echo feedback', async () => {
   detachSecond();
 });
 
-test('peers inside the sync threshold stay put', async () => {
+test('peers inside the one-pixel sync threshold stay put', async () => {
   const preview = fakeScroller(2000, 200) as unknown as HTMLElement;
   const detach = attachScrollSync(preview, 'tab-threshold');
   const before = preview.scrollTop;
 
-  // 0.004 of the scrollable range: inside the jitter threshold.
-  publishScrollRatio('tab-threshold', 0.004);
+  // One CSS pixel of the 1,800px scrollable range is jitter, not a move.
+  publishScrollRatio('tab-threshold', 1 / 1800);
   await flush();
   assert.equal(preview.scrollTop, before);
 
@@ -88,6 +98,51 @@ test('peers inside the sync threshold stay put', async () => {
   await flush();
   assert.equal(preview.scrollTop, 900);
   detach();
+});
+
+test('the tolerance stays one CSS pixel on very long documents', async () => {
+  // 1,000,000px of scrollable range: the old 0.005 ratio threshold equalled
+  // 5,000px here, so it ignored real position changes.
+  const pane = fakeScroller(1_000_010, 10) as unknown as HTMLElement;
+  const detach = attachScrollSync(pane, 'tab-long-threshold');
+
+  publishScrollRatio('tab-long-threshold', 0.5);
+  await flush();
+  assert.equal(pane.scrollTop, 500_000);
+
+  // One pixel of jitter stays put…
+  publishScrollRatio('tab-long-threshold', 500_001 / 1_000_000);
+  await flush();
+  assert.equal(pane.scrollTop, 500_000);
+
+  // …while ten pixels is a real move and must be applied.
+  publishScrollRatio('tab-long-threshold', 500_010 / 1_000_000);
+  await flush();
+  assert.ok(Math.abs(pane.scrollTop - 500_010) < 1e-6);
+  detach();
+});
+
+test('a genuine scroll after a programmatic sync is published despite its tiny ratio delta', async () => {
+  const left = fakeScroller(1_000_010, 10) as unknown as HTMLElement;
+  const right = fakeScroller(1_000_010, 10) as unknown as HTMLElement;
+  const publishes: number[] = [];
+  const stop = subscribeScrollRatio('tab-long-echo', ratio => publishes.push(ratio));
+  const detachLeft = attachScrollSync(left, 'tab-long-echo');
+  const detachRight = attachScrollSync(right, 'tab-long-echo');
+
+  // The peer write and the user's follow-up scroll both happen before the
+  // browser delivers the coalesced scroll event. The reported offset is 200px
+  // away from the assigned one, but only 0.0002 away as a ratio.
+  publishScrollRatio('tab-long-echo', 0.5);
+  ((right as unknown as { scroll(offset: number): void }).scroll)(500_200);
+  await flush();
+
+  assert.equal(right.scrollTop, 500_200);
+  assert.equal(left.scrollTop, 500_200);
+  assert.ok(publishes.some(ratio => Math.abs(ratio - 0.5002) < 1e-9));
+  stop();
+  detachLeft();
+  detachRight();
 });
 
 test('a fully visible document publishes nothing and cannot be moved', async () => {
