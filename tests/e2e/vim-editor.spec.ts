@@ -174,6 +174,36 @@ test('3dw deletes three words', async ({ page }) => {
   await expectDocument(editor, 'four five');
 });
 
+test('3f.;, follows Neovim character finding with a count', async ({ page }) => {
+  const editor = await openEditor(page, 'a.b.c.d.e.f');
+  await runKeys(page, 'gg3f.;,');
+
+  const state = await fixtureState(page);
+  expect(state.cursor).toBe(5);
+  expect(state.mode).toBe('normal');
+  await expectDocument(editor, 'a.b.c.d.e.f');
+});
+
+test('2F.; repeats a counted backward character search', async ({ page }) => {
+  const editor = await openEditor(page, 'a.b.c.d.e.f');
+  await runKeys(page, 'gg$2F.;');
+
+  const state = await fixtureState(page);
+  expect(state.cursor).toBe(5);
+  expect(state.mode).toBe('normal');
+  await expectDocument(editor, 'a.b.c.d.e.f');
+});
+
+test('2t.;;2T. follows Neovim till motion counts in both directions', async ({ page }) => {
+  const editor = await openEditor(page, 'a.b.c.d.e.f');
+  await runKeys(page, 'gg2t.;;2T.');
+
+  const state = await fixtureState(page);
+  expect(state.cursor).toBe(4);
+  expect(state.mode).toBe('normal');
+  await expectDocument(editor, 'a.b.c.d.e.f');
+});
+
 test('ciw changes the inner word', async ({ page }) => {
   const editor = await openEditor(page, 'alpha beta gamma');
   await moveToStart(page);

@@ -67,6 +67,64 @@ test('Vim is off by default and ordinary typing is unchanged', async ({ page }) 
   await expectState(page, { doc: 'iabc', mode: 'inactive' });
 });
 
+test('characterwise Visual mode shows the exact selected characters, including the cursor cell', async ({ page }) => {
+  const editor = await openEditor(page, { a: 'alpha beta\nsecond line', vim: true });
+  const cmEditor = editor.locator('.cm-editor');
+  const selectionColor = 'rgb(54, 88, 120)';
+  const accentColor = 'rgb(89, 185, 209)';
+  const foregroundColor = 'rgb(229, 231, 235)';
+
+  await cmEditor.evaluate((element, colors) => {
+    element.style.setProperty('--selection', colors.selection);
+    element.style.setProperty('--accent', colors.accent);
+    element.style.setProperty('--text', colors.foreground);
+  }, { selection: selectionColor, accent: accentColor, foreground: foregroundColor });
+
+  await page.keyboard.press('v');
+  await expect(cmEditor).toHaveClass(/vim-visual-mode/);
+
+  const cursor = cmEditor.locator('.cm-fat-cursor');
+  await expect(cursor).toBeVisible();
+  const initialCursorBox = await cursor.boundingBox();
+  expect(initialCursorBox).not.toBeNull();
+  const initialCursorStyle = await cursor.evaluate(element => {
+    const style = getComputedStyle(element);
+    return { backgroundColor: style.backgroundColor, color: style.color, boxShadow: style.boxShadow };
+  });
+  expect(initialCursorStyle.backgroundColor).toBe(selectionColor);
+  expect(initialCursorStyle.color).toBe(foregroundColor);
+  expect(initialCursorStyle.boxShadow).toContain('rgb(89, 185, 209)');
+
+  // `v` must select exactly the character under the cursor, not a collapsed
+  // range. Verify the rendered CodeMirror selection, not a synthetic text Range.
+  expect((await state(page)).cursor.selected).toBe(1);
+  const initialSelection = cmEditor.locator('.cm-selectionBackground');
+  await expect(initialSelection).toHaveCount(1);
+  const initialSelectionBox = await initialSelection.boundingBox();
+  expect(initialSelectionBox).not.toBeNull();
+  expect(Math.abs(initialCursorBox!.x - initialSelectionBox!.x)).toBeLessThan(2);
+  expect(initialCursorBox!.width).toBeCloseTo(initialSelectionBox!.width, 0);
+  expect(initialSelectionBox!.width).toBeLessThan(100);
+
+  await page.keyboard.press('l');
+  await expect.poll(async () => (await state(page)).cursor.selected).toBe(2);
+
+  const expandedSelection = cmEditor.locator('.cm-selectionBackground');
+  await expect(expandedSelection).toHaveCount(1);
+  const expandedBox = await expandedSelection.boundingBox();
+  expect(expandedBox).not.toBeNull();
+  expect(expandedBox!.width).toBeCloseTo(initialSelectionBox!.width * 2, 0);
+  expect(expandedBox!.height).toBeCloseTo(initialSelectionBox!.height, 0);
+  expect(expandedBox!.width).toBeLessThan(100);
+
+  const movedCursorBox = await cursor.boundingBox();
+  expect(movedCursorBox).not.toBeNull();
+  expect(movedCursorBox!.x).toBeCloseTo(initialSelectionBox!.x + initialSelectionBox!.width, 0);
+  expect(movedCursorBox!.width).toBeCloseTo(initialSelectionBox!.width, 0);
+  expect(await cursor.evaluate(element => getComputedStyle(element).color)).toBe(foregroundColor);
+  expect(await cursor.evaluate(element => getComputedStyle(element).boxShadow)).toContain('rgb(89, 185, 209)');
+});
+
 test('enabling Vim preserves the document, cursor, and CodeMirror history', async ({ page }) => {
   const editor = await openEditor(page, { a: 'alpha', vim: false });
 

@@ -17,6 +17,15 @@ body,
     height: 100%;
 }
 
+/* Vim renders its active block cursor as .cm-fat-cursor. In characterwise
+   Visual mode it is the selected endpoint, so blend it into the exact text
+   selection and keep the glyph readable in both light and dark themes. */
+.cm-editor.vim-visual-mode .cm-fat-cursor {
+    background: var(--selection) !important;
+    color: var(--text) !important;
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 .cm-scroller {
     overflow: auto;
 }

@@ -171,6 +171,21 @@ local cases = {
     keys = 'gg$v?beta<CR>',
   },
   {
+    id = 'character-find-count-forward-repeat',
+    doc = 'a.b.c.d.e.f',
+    keys = 'gg3f.;,',
+  },
+  {
+    id = 'character-find-count-backward-repeat',
+    doc = 'a.b.c.d.e.f',
+    keys = 'gg$2F.;',
+  },
+  {
+    id = 'character-find-till-count-both-directions',
+    doc = 'a.b.c.d.e.f',
+    keys = 'gg2t.;;2T.',
+  },
+  {
     id = 'count-multiplication',
     doc = 'one two three four five six seven eight',
     keys = 'gg2d3w',

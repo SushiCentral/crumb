@@ -73,6 +73,9 @@ test('the semantic oracle is pinned to the verified Neovim version instead of a 
     'search-backward-count',
     'search-backward-operator',
     'search-backward-visual',
+    'character-find-count-forward-repeat',
+    'character-find-count-backward-repeat',
+    'character-find-till-count-both-directions',
     'count-multiplication',
     'linewise-register-kind',
     'transient-command-reset',
@@ -195,6 +198,25 @@ test('the oracle records a case-sensitive search and a forward/backward pair', (
   assert.equal(group.expected.cursor, 6);
   assert.equal(boundary.expected.cursor, 9);
   assert.equal(backward.expected.cursor, 11);
+});
+
+test('the oracle records character finding with counts and repeat direction', () => {
+  const forward = fixture.cases.find(item => item.id === 'character-find-count-forward-repeat');
+  const backward = fixture.cases.find(item => item.id === 'character-find-count-backward-repeat');
+  const till = fixture.cases.find(item => item.id === 'character-find-till-count-both-directions');
+  assert.ok(forward && backward && till);
+  assert.deepEqual(
+    [forward.keys, forward.expected.doc, forward.expected.line, forward.expected.column, forward.expected.cursor, forward.expected.undoSteps],
+    ['gg3f.;,', 'a.b.c.d.e.f', 1, 5, 5, 0],
+  );
+  assert.deepEqual(
+    [backward.keys, backward.expected.line, backward.expected.column, backward.expected.cursor],
+    ['gg$2F.;', 1, 5, 5],
+  );
+  assert.deepEqual(
+    [till.keys, till.expected.line, till.expected.column, till.expected.cursor],
+    ['gg2t.;;2T.', 1, 4, 4],
+  );
 });
 
 test('counts multiply and register kinds are preserved', () => {

@@ -281,15 +281,17 @@ Expected: fixtures match the selected Neovim defaults in the agreed contract; `:
 - Modify: `tests/e2e/vim-editor.spec.ts`, `package.json`, `package-lock.json`
 - Verify: `docs/superpowers/specs/2026-10-26-native-vim-mode-design.md`
 
-- [ ] **Step 1: Write documentation from behavior fixtures**
+- [x] **Step 1: Write documentation from behavior fixtures**
 
 Create `docs/vim.md` with enable/disable steps, the typed config API and complete mapping examples, the guaranteed command matrix, unsupported features, Neovim-default decisions, engine-specific differences, and direct official references. For every row in the command table, list a reference and a test fixture; do not claim full Vim/Neovim compatibility.
 
-- [ ] **Step 2: Complete keyboard and lifecycle browser tests**
+- [x] **Step 2: Complete keyboard and lifecycle browser tests**
 
 Cover two tabs, same-tab split panes, persistent registers/search/repeat/marks, transient cancellation, toggle off/on, theme changes, `:w`, unsaved/untitled saves, React StrictMode, focus, and Ctrl-W/O/B/N/P/J/save ownership. Verify Tauri-specific IME/clipboard/focus manually and record OS/WebView results in the task report.
 
-- [ ] **Step 3: Run focused checks**
+The Chromium App integration suite covers keyboard ownership and real-App save flows with a narrow Tauri IPC stub. Native Tauri WebView IME, clipboard, and OS/WebView focus checks were not executable in this environment and remain explicitly unverified.
+
+- [x] **Step 3: Run focused checks**
 
 Run `node --test tests/preferences.test.ts tests/editor-extensions.test.ts tests/vim-config.test.ts tests/vim-shortcuts.test.ts tests/vim-engine.test.ts tests/vim-semantics.test.ts`.
 
@@ -299,7 +301,7 @@ Run `npm run build`.
 
 Expected: all commands exit 0; no Vim runtime dependency is required; the package build contains no duplicate CodeMirror instances.
 
-- [ ] **Step 4: Reconcile final scope and request commit approval**
+- [x] **Step 4: Reconcile final scope and request commit approval**
 
 Check the complete diff against the approved design, ensure only the listed Vim module/settings/tests/docs files changed, verify the MIT license notice is preserved for distributable builds, and report manual Tauri checks not executable in the current environment. Ask the user for explicit approval of the proposed commit message before any commit.
 

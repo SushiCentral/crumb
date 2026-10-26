@@ -135,6 +135,9 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
     const view = viewRef.current;
     if (!view) return;
     vimStateSubscriptionRef.current = vim.observeState(view, state => {
+      // Mark characterwise Visual mode so its active fat-cursor cell can be
+      // styled as part of the selected text, without affecting other modes.
+      view.dom.classList.toggle('vim-visual-mode', state.mode === 'visual');
       onVimStateChangeRef.current?.(paneId, state);
     });
   };

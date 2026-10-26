@@ -60,6 +60,24 @@ function focusedSurfaceFor(element: Element | null, flags: FocusedSurfaceFlags):
 }
 
 /**
+ * Ctrl bindings that Vim treats as buffer/window commands and that Crumb's
+ * App would otherwise interpret as document commands. When focus belongs to a
+ * terminal or a Vim prompt input, these keys belong to that input instead.
+ * Keep this set aligned with VIM_BUILTIN_CTRL_KEYS in lib/vim/shortcuts.ts.
+ */
+const INPUT_OWNED_VIM_CTRL_KEYS: ReadonlySet<string> = new Set([
+  'w', 'o', 'b', 'n', 'p', 'j',
+]);
+
+function isInputOwnedVimCtrlKey(event: KeyboardEvent): boolean {
+  return event.ctrlKey
+    && !event.metaKey
+    && !event.altKey
+    && !event.shiftKey
+    && INPUT_OWNED_VIM_CTRL_KEYS.has(event.key.toLowerCase());
+}
+
+/**
  * The Vim lifecycle exposes one pending status string (counts, register, and
  * command prefix combined). Forward it as the pending command field; mode is
  * the typed lifecycle mode. Inactive editors have no status bar entry.
@@ -692,12 +710,13 @@ export default function App() {
       const vimState = editorRefs.current
         .get(focusedPane?.dataset.paneId ?? activePaneIdRef.current)
         ?.getVimState() ?? null;
+      const focusedSurface = focusedSurfaceFor(focusedElement, {
+        paletteOpen: isPaletteOpen,
+        dialogOpen: isSettingsOpen || currentPendingCloseId != null || isCloseAllConfirmationOpen,
+      });
       const vimOwnsShortcut = shouldVimOwnShortcut({
         enabled: editorPreferences.vimModeEnabled,
-        focusedSurface: focusedSurfaceFor(focusedElement, {
-          paletteOpen: isPaletteOpen,
-          dialogOpen: isSettingsOpen || currentPendingCloseId != null || isCloseAllConfirmationOpen,
-        }),
+        focusedSurface,
         mode: vimState?.mode ?? 'inactive',
         key: e.key,
         ctrlKey: e.ctrlKey,
@@ -711,6 +730,12 @@ export default function App() {
       // Do not preventDefault/stopPropagation here: returning lets the event
       // continue to the focused CodeMirror Vim adapter, which owns the key.
       if (vimOwnsShortcut) return;
+
+      // A terminal or ordinary text input (Vim prompts, Search files, and
+      // sidebar inputs included) owns these Ctrl bindings. Returning without
+      // preventDefault/stopPropagation lets xterm's PTY or the input handle the
+      // key; Ctrl-S and other global shortcuts still fall through to App below.
+      if ((focusedSurface === 'terminal' || focusedSurface === 'input') && isInputOwnedVimCtrlKey(e)) return;
 
       const scaling = scaleShortcut(e);
       if (scaling) {
@@ -832,6 +857,7 @@ export default function App() {
     { id: 'terminal', label: isPanelOpen ? 'View: Hide Terminal' : 'View: Show Terminal', shortcut: 'Ctrl/Cmd J', run: () => setIsPanelOpen(value => !value) },
     { id: 'explorer', label: isSidebarOpen ? 'View: Hide File Tree' : 'View: Show File Tree', shortcut: 'Ctrl/Cmd B', run: () => setIsSidebarOpen(value => !value) },
     { id: 'word-wrap', label: wordWrap ? 'Editor: Disable Word Wrap' : 'Editor: Enable Word Wrap', detail: wordWrap ? 'Wrapping is on' : 'Wrapping is off', run: () => setWordWrap(value => !value) },
+    { id: 'vim-mode', label: editorPreferences.vimModeEnabled ? 'Editor: Disable Vim Mode' : 'Editor: Enable Vim Mode', detail: editorPreferences.vimModeEnabled ? 'Vim mode is on' : 'Vim mode is off', run: () => setEditorPreferences(current => ({ ...current, vimModeEnabled: !current.vimModeEnabled })) },
     ...(activeTab ? [{ id: 'split-editor', label: 'Editor: Open Active File in Split View', run: () => openInSplit(activeTab.id) }] : []),
     ...(canPreviewMarkdown ? [{ id: 'markdown-preview', label: isPreviewOpen ? 'Markdown: Hide Preview' : 'Markdown: Open Preview to Side', run: toggleMarkdownPreview }] : []),
     { id: 'font-up', label: 'Appearance: Increase Font Size', detail: `Currently ${fontSize}px`, run: () => setFontSize(value => Math.min(24, value + 1)) },
