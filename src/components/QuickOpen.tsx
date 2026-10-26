@@ -78,7 +78,9 @@ const QuickOpen = forwardRef<QuickOpenHandle, Props>(function QuickOpen({ rootPa
     inputRef.current?.blur();
   };
 
-  return <div className="quick-open" ref={containerRef}>
+  return <div className="quick-open" ref={containerRef} onBlur={event => {
+    if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false);
+  }}>
     <svg className="quick-open-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.5" /><path d="m16 16 5 5" /></svg>
     <input ref={inputRef} value={query} aria-label="Search files" role="combobox" aria-expanded={open} aria-controls="quick-open-results"
       placeholder={rootPath ? 'Search files by name' : 'Search open files'}

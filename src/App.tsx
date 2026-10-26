@@ -20,10 +20,9 @@ import CommandPalette, { type PaletteCommand } from "./components/CommandPalette
 import QuickOpen, { type QuickOpenHandle } from "./components/QuickOpen";
 import { codeFonts, getTheme, themes, themeVariables } from "./lib/themes";
 import { languageName } from "./lib/languages";
-import { FolderIcon, SearchIcon, SettingsIcon, SplitPreviewIcon } from "./components/Icons";
+import { FolderIcon, KeyboardIcon, SearchIcon, SettingsIcon, SplitPreviewIcon } from "./components/Icons";
 import "./App.css";
 
-const initialDoc = `// Welcome to Crumb\n\nfunction hello() {\n  console.log("Hello, world!");\n}\n`;
 const MarkdownPreview = lazy(() => import('./components/MarkdownPreview'));
 const isMarkdownPath = (path: string | null) => path != null && /\.(md|markdown)$/i.test(path);
 
@@ -53,7 +52,7 @@ interface PendingCloseOperation {
 }
 
 const newUntitledTab = (): EditorTab => ({
-  id: crypto.randomUUID(), path: null, content: initialDoc, savedContent: initialDoc,
+  id: crypto.randomUUID(), path: null, content: '', savedContent: '',
 });
 
 const readPreference = (key: string, fallback: string) => {
@@ -123,6 +122,7 @@ export default function App() {
 
   const splitDragRef = useRef<{ leftId: string; rightId: string; startX: number; leftWidth: number; rightWidth: number } | null>(null);
   const quickOpenRef = useRef<QuickOpenHandle>(null);
+  const commandTriggerRef = useRef<HTMLButtonElement>(null);
   const tabMenuRef = useRef<HTMLDivElement>(null);
   const sidebarDraggingRef = useRef(false);
   const panelDraggingRef = useRef(false);
@@ -656,7 +656,7 @@ export default function App() {
         setIsSettingsOpen(open => !open);
         return;
       }
-      if (isPaletteOpen || isSettingsOpen) return;
+      if (isSettingsOpen) return;
 
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
@@ -664,6 +664,7 @@ export default function App() {
         quickOpenRef.current?.focus();
         return;
       }
+      if (isPaletteOpen) return;
       if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'w') {
         e.preventDefault();
         e.stopPropagation();
@@ -755,11 +756,27 @@ export default function App() {
   return (
     <div className="app-shell" style={{ ...themeVariables(theme, codeFont), colorScheme: theme.dark ? 'dark' : 'light', height: "100vh", width: "100vw", display: "flex", flexDirection: "column", overflow: "hidden", backgroundColor: "var(--editor)", color: "var(--text)" }}>
       <header className="top-bar">
-        <div className="top-bar-brand"><strong>crumb</strong><span className="top-bar-workspace" title={explorerRootPath ?? 'No folder open'}>{explorerRootPath ? getFileNameFromPath(explorerRootPath) : 'No folder'}</span></div>
-        <QuickOpen ref={quickOpenRef} rootPath={explorerRootPath} openPaths={tabs.flatMap(tab => tab.path ? [tab.path] : [])} onOpenFile={path => { void handleOpenFile(path); }} />
+        <div className="top-bar-brand" title={explorerRootPath ? `Crumb — ${explorerRootPath}` : 'Crumb'}>
+          <strong>{explorerRootPath ? getFileNameFromPath(explorerRootPath) : 'Crumb'}</strong>
+        </div>
+        <div className={`command-center ${isPaletteOpen ? 'open' : ''}`}>
+          <button ref={commandTriggerRef} className="command-trigger" title={`Open command palette (${shortcutLabel('Shift+P')})`} onClick={() => setIsPaletteOpen(true)} tabIndex={isPaletteOpen ? -1 : 0} aria-hidden={isPaletteOpen || undefined}>
+            <KeyboardIcon /><span>Commands</span><kbd>{shortcutLabel('Shift+P')}</kbd>
+          </button>
+          {isPaletteOpen && <CommandPalette
+            triggerRef={commandTriggerRef}
+            commands={commands}
+            themes={themes}
+            currentThemeId={themeId}
+            codeFontOverride={codeFontOverride}
+            onCodeFontChange={setCodeFontOverride}
+            onThemeChange={setThemeId}
+            onClose={() => setIsPaletteOpen(false)}
+          />}
+        </div>
         <div className="top-bar-actions">
+          <QuickOpen ref={quickOpenRef} rootPath={explorerRootPath} openPaths={tabs.flatMap(tab => tab.path ? [tab.path] : [])} onOpenFile={path => { void handleOpenFile(path); }} />
           {canPreviewMarkdown && <button className={`markdown-preview-toggle ${isPreviewOpen ? 'active' : ''}`} aria-pressed={isPreviewOpen} title={isPreviewOpen ? 'Hide Markdown preview' : 'Open Markdown preview to the side'} onClick={toggleMarkdownPreview}><SplitPreviewIcon /><span>Preview</span></button>}
-          <button title={`Commands and themes (${shortcutLabel('Shift+P')})`} onClick={() => setIsPaletteOpen(true)}>Commands</button>
         </div>
       </header>
 
@@ -1109,20 +1126,7 @@ export default function App() {
         <BottomPanel isOpen={isPanelOpen} clearPromptOnStart={clearPromptOnStart} onClose={() => setIsPanelOpen(false)} onActiveSessionChange={setActiveTerminalSessionId} theme={theme} fontSize={fontSize} fontFamily={codeFont} focusRequest={terminalFocusRequest} workingDirectory={explorerRootPath} openTerminalRequest={openTerminalRequest} />
       </div>
 
-      {/* Command Palette */}
       <StatusBar hasDocument={activeTab != null} cursor={activeCursor} preferences={editorPreferences} lineEnding={activeLineEnding} language={activeTab ? languageName(activeTab.path) : 'No file'} wordWrap={wordWrap} zoom={zoomLevel} theme={theme.name} />
-      {isPaletteOpen && (
-        <CommandPalette
-          commands={commands}
-          themes={themes}
-          currentThemeId={themeId}
-          codeFontOverride={codeFontOverride}
-          onCodeFontChange={setCodeFontOverride}
-          onThemeChange={setThemeId}
-          onClose={() => setIsPaletteOpen(false)}
-        />
-      )}
-
       {/* Settings Modal */}
       {isSettingsOpen && (
           <SettingsModal
