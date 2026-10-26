@@ -1,3 +1,4 @@
+import { shortcutLabel } from '../lib/platform';
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import Terminal from './Terminal';
@@ -271,7 +272,7 @@ export default function BottomPanel({ isOpen, clearPromptOnStart, onClose, onAct
         <button 
           className="icon-btn" 
           onClick={onClose}
-          title="Close Panel (⌘J / Ctrl+J)"
+          title={`Close panel (${shortcutLabel('J')})`}
           style={{ marginLeft: activeTab === 'terminal' ? '0' : '8px' }}
         >
           <CloseIcon />

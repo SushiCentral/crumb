@@ -1,3 +1,4 @@
+import { shortcutLabel } from '../lib/platform';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { codeFonts, type Theme } from '../lib/themes';
 import { CloseIcon } from './Icons';
@@ -104,7 +105,7 @@ export default function SettingsModal({ themes, currentThemeId, onThemeChange, o
               </select>
             </div>
             <div className="settings-row">
-              <div className="settings-row-label"><label htmlFor="font-size-slider">Font size ({fontSize}px)</label><small>10–24px · Ctrl+Shift+= / −</small></div>
+              <div className="settings-row-label"><label htmlFor="font-size-slider">Font size ({fontSize}px)</label><small>10–24px · {shortcutLabel('Shift+=')} / {shortcutLabel('Shift+−')}</small></div>
               <div className="settings-row-control font-size-control">
                 <input id="font-size-slider" type="range" min="10" max="24" value={fontSize} onChange={event => onFontSizeChange(Number(event.target.value))} className="settings-range" />
                 <input type="number" aria-label="Font size in pixels" min="10" max="24" value={fontSize} onChange={event => onFontSizeChange(Math.min(24, Math.max(10, Number(event.target.value))))} className="settings-number-input" />

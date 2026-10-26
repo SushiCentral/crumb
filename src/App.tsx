@@ -3,6 +3,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeTextFile, stat } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { shortcutLabel } from './lib/platform';
 import { scaleShortcut, nextZoom } from './lib/scale-shortcuts';
 import { readNumber, readBoolean, clampPanelHeight, clampSidebarWidth, readEditorPreferences, lineEnding } from './lib/preferences';
 import type { CursorInfo } from './lib/editor-extensions';
@@ -112,8 +113,6 @@ export default function App() {
 
   const tabsRef = useRef(tabs);
   const zoomQueueRef = useRef(Promise.resolve());
-  const previousZoomRef = useRef(zoomLevel);
-  const previousFontSizeRef = useRef(fontSize);
   const activeTabIdRef = useRef(activeTabId);
   const panesRef = useRef(panes);
   const activePaneIdRef = useRef(activePaneId);
@@ -189,14 +188,7 @@ export default function App() {
     zoomQueueRef.current = zoomQueueRef.current
       .then(() => getCurrentWebview().setZoom(zoomLevel))
       .catch(error => { console.error('Could not scale the interface:', error); });
-    if (previousZoomRef.current !== zoomLevel) addToast(`Zoom ${Math.round(zoomLevel * 100)}%`);
-    previousZoomRef.current = zoomLevel;
   }, [zoomLevel]);
-
-  useEffect(() => {
-    if (previousFontSizeRef.current !== fontSize) addToast(`Font ${fontSize}px`);
-    previousFontSizeRef.current = fontSize;
-  }, [fontSize]);
 
   useEffect(() => {
     const resize = () => {
@@ -731,37 +723,37 @@ export default function App() {
   }, [isPaletteOpen, isSettingsOpen, isPanelOpen, currentPendingCloseId, isCloseAllConfirmationOpen]);
 
   const commands: PaletteCommand[] = [
-    { id: 'settings', label: 'Preferences: Open Settings', shortcut: 'Ctrl/Cmd ,', run: () => setIsSettingsOpen(true) },
+    { id: 'settings', label: 'Preferences: Open Settings', shortcut: shortcutLabel(','), run: () => setIsSettingsOpen(true) },
     { id: 'theme', label: 'Preferences: Color Theme', detail: `Current: ${theme.name}`, run: () => {} },
     { id: 'code-font', label: 'Preferences: Editor Font', detail: `Current: ${codeFont}`, run: () => {} },
-    { id: 'search-files', label: 'View: Find in Files (Search)', shortcut: 'Ctrl/Cmd Shift F', run: () => { setIsSidebarOpen(true); setSidebarTab('search'); } },
-    { id: 'terminal', label: isPanelOpen ? 'View: Hide Terminal' : 'View: Show Terminal', shortcut: 'Ctrl/Cmd J', run: () => setIsPanelOpen(value => !value) },
-    { id: 'explorer', label: isSidebarOpen ? 'View: Hide File Tree' : 'View: Show File Tree', shortcut: 'Ctrl/Cmd B', run: () => setIsSidebarOpen(value => !value) },
+    { id: 'search-files', label: 'View: Find in Files (Search)', shortcut: shortcutLabel('Shift+F'), run: () => { setIsSidebarOpen(true); setSidebarTab('search'); } },
+    { id: 'terminal', label: isPanelOpen ? 'View: Hide Terminal' : 'View: Show Terminal', shortcut: shortcutLabel('J'), run: () => setIsPanelOpen(value => !value) },
+    { id: 'explorer', label: isSidebarOpen ? 'View: Hide File Tree' : 'View: Show File Tree', shortcut: shortcutLabel('B'), run: () => setIsSidebarOpen(value => !value) },
     { id: 'word-wrap', label: wordWrap ? 'Editor: Disable Word Wrap' : 'Editor: Enable Word Wrap', detail: wordWrap ? 'Wrapping is on' : 'Wrapping is off', run: () => setWordWrap(value => !value) },
     ...(activeTab ? [{ id: 'split-editor', label: 'Editor: Open Active File in Split View', run: () => openInSplit(activeTab.id) }] : []),
     ...(canPreviewMarkdown ? [{ id: 'markdown-preview', label: isPreviewOpen ? 'Markdown: Hide Preview' : 'Markdown: Open Preview to Side', run: toggleMarkdownPreview }] : []),
     { id: 'font-up', label: 'Appearance: Increase Font Size', detail: `Currently ${fontSize}px`, run: () => setFontSize(value => Math.min(24, value + 1)) },
     { id: 'font-down', label: 'Appearance: Decrease Font Size', detail: `Currently ${fontSize}px`, run: () => setFontSize(value => Math.max(10, value - 1)) },
     { id: 'font-reset', label: 'Appearance: Reset Font Size', detail: '13px', run: () => setFontSize(13) },
-    { id: 'open', label: 'File: Open File', shortcut: 'Ctrl/Cmd O', run: () => void handleOpenFile() },
+    { id: 'open', label: 'File: Open File', shortcut: shortcutLabel('O'), run: () => void handleOpenFile() },
     { id: 'open-folder', label: 'File: Open Folder / Project', run: () => void handleChooseFolder() },
-    { id: 'quick-open', label: 'File: Search Files', shortcut: 'Ctrl/Cmd P', run: () => quickOpenRef.current?.focus() },
-    { id: 'new', label: 'File: New File', shortcut: 'Ctrl/Cmd N', run: addUntitledTab },
-    ...(activeTab ? [{ id: 'save', label: 'File: Save File', shortcut: 'Ctrl/Cmd S', run: () => void handleSaveFile() }] : []),
+    { id: 'quick-open', label: 'File: Search Files', shortcut: shortcutLabel('P'), run: () => quickOpenRef.current?.focus() },
+    { id: 'new', label: 'File: New File', shortcut: shortcutLabel('N'), run: addUntitledTab },
+    ...(activeTab ? [{ id: 'save', label: 'File: Save File', shortcut: shortcutLabel('S'), run: () => void handleSaveFile() }] : []),
     { id: 'terminal-folder', label: 'File: Open Current Terminal Folder', run: () => void handleOpenTerminalFolder() },
   ];
 
   return (
     <div className="app-shell" style={{ ...themeVariables(theme, codeFont), colorScheme: theme.dark ? 'dark' : 'light', height: "100vh", width: "100vw", display: "flex", flexDirection: "column", overflow: "hidden", backgroundColor: "var(--editor)", color: "var(--text)" }}>
       <header className="top-bar">
-        <div className="top-bar-brand"><FolderIcon width={17} height={17} /><strong>crumb</strong></div>
+        <div className="top-bar-brand"><strong>crumb</strong></div>
         <QuickOpen ref={quickOpenRef} rootPath={explorerRootPath} openPaths={tabs.flatMap(tab => tab.path ? [tab.path] : [])} onOpenFile={path => { void handleOpenFile(path); }} />
         <div className="top-bar-actions">
           <span className="top-bar-workspace" title={explorerRootPath ?? 'No folder open'}>{explorerRootPath ? getFileNameFromPath(explorerRootPath) : 'No folder'}</span>
           <span className="top-bar-language" title="Current file language">{activeTab ? languageName(activeTab.path) : ''}</span>
           {canPreviewMarkdown && <button className={`markdown-preview-toggle ${isPreviewOpen ? 'active' : ''}`} aria-pressed={isPreviewOpen} title={isPreviewOpen ? 'Hide Markdown preview' : 'Open Markdown preview to the side'} onClick={toggleMarkdownPreview}><SplitPreviewIcon /><span>Preview</span></button>}
           {tabs.length > 0 && <button title="Close all editor tabs" onClick={closeAllTabsAndPanes}>Close All</button>}
-          <button title="Commands and themes (Ctrl/Cmd+Shift+P)" onClick={() => setIsPaletteOpen(true)}>Commands</button>
+          <button title={`Commands and themes (${shortcutLabel('Shift+P')})`} onClick={() => setIsPaletteOpen(true)}>Commands</button>
         </div>
       </header>
 
@@ -780,7 +772,7 @@ export default function App() {
                 setSidebarTab('explorer');
               }
             }}
-            title="Explorer (⌘B)"
+            title={`Explorer (${shortcutLabel('B')})`}
             aria-label="Toggle file explorer"
             className={`activity-btn ${isSidebarOpen && sidebarTab === 'explorer' ? 'active' : ''}`}
           >
@@ -799,7 +791,7 @@ export default function App() {
                 setSidebarTab('search');
               }
             }}
-            title="Search in Files (⌘Shift+F)"
+            title={`Search in files (${shortcutLabel('Shift+F')})`}
             aria-label="Toggle search in files"
             className={`activity-btn ${isSidebarOpen && sidebarTab === 'search' ? 'active' : ''}`}
           >
@@ -811,7 +803,7 @@ export default function App() {
           {/* Settings Button */}
           <button
             onClick={() => setIsSettingsOpen(true)}
-            title="Editor Settings (⌘,)"
+            title={`Editor settings (${shortcutLabel(',')})`}
             aria-label="Open settings"
             className="activity-btn activity-btn-settings"
           >
@@ -821,7 +813,7 @@ export default function App() {
           {/* Command Palette Trigger */}
           <button
             onClick={() => setIsPaletteOpen(true)}
-            title="Commands and themes (Ctrl/Cmd+Shift+P)"
+            title={`Commands and themes (${shortcutLabel('Shift+P')})`}
             aria-label="Open command palette"
             className="activity-btn activity-btn-palette"
           >
@@ -1096,7 +1088,7 @@ export default function App() {
       </div>
 
       {/* Command Palette */}
-      <StatusBar cursor={activeCursor} preferences={editorPreferences} lineEnding={activeLineEnding} language={activeTab ? languageName(activeTab.path) : 'No file'} wordWrap={wordWrap} zoom={zoomLevel} theme={theme.name} />
+      <StatusBar hasDocument={activeTab != null} cursor={activeCursor} preferences={editorPreferences} lineEnding={activeLineEnding} language={activeTab ? languageName(activeTab.path) : 'No file'} wordWrap={wordWrap} zoom={zoomLevel} theme={theme.name} />
       {isPaletteOpen && (
         <CommandPalette
           commands={commands}

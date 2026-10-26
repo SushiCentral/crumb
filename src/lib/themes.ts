@@ -4,7 +4,6 @@ export interface Theme {
   id: string;
   name: string;
   dark: boolean;
-  uiFont: string;
   codeFont: string;
   colors: {
     activity: string; sidebar: string; editor: string; panel: string;
@@ -23,7 +22,7 @@ export interface Theme {
 export const themes: Theme[] = [
   {
     id: 'crumb', name: 'Crumb', dark: true,
-    uiFont: 'Inter', codeFont: 'JetBrains Mono',
+    codeFont: 'JetBrains Mono',
     colors: {
       activity: '#171d27', sidebar: '#202937', editor: '#151b24', panel: '#1b2531',
       panelHeader: '#263244', terminal: '#101821', terminalSidebar: '#16202b', surface: '#29384a',
@@ -39,12 +38,12 @@ export const themes: Theme[] = [
   },
   {
     id: 'one-dark', name: 'One Dark', dark: true,
-    uiFont: 'Inter', codeFont: 'JetBrains Mono',
+    codeFont: 'JetBrains Mono',
     colors: {
       activity: '#21252b', sidebar: '#282c34', editor: '#2c313c', panel: '#242933',
       panelHeader: '#21252b', terminal: '#1f2329', terminalSidebar: '#282c34', surface: '#353b45',
       border: '#3e4451', text: '#abb2bf', muted: '#9da5b4', subtle: '#8a93a3',
-      accent: '#61afef', accentText: '#192733', hover: '#3a404a', selection: '#3e5975',
+      accent: '#61afef', accentText: '#192733', hover: '#3a404a', selection: '#30445c',
       gutter: '#8a93a3', activeLine: '#353b45', warning: '#e5c07b', button: '#61afef',
     },
     syntax: {
@@ -55,7 +54,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'dracula', name: 'Dracula', dark: true,
-    uiFont: 'Space Grotesk', codeFont: 'Fira Code',
+    codeFont: 'Fira Code',
     colors: {
       activity: '#21222c', sidebar: '#282a36', editor: '#2d3040', panel: '#262837',
       panelHeader: '#343746', terminal: '#21222c', terminalSidebar: '#282a36', surface: '#3d4052',
@@ -71,7 +70,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'catppuccin-mocha', name: 'Catppuccin Mocha', dark: true,
-    uiFont: 'Inter', codeFont: 'JetBrains Mono',
+    codeFont: 'JetBrains Mono',
     colors: {
       activity: '#11111b', sidebar: '#181825', editor: '#1e1e2e', panel: '#181825',
       panelHeader: '#242439', terminal: '#11111b', terminalSidebar: '#181825', surface: '#313244',
@@ -87,7 +86,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'catppuccin-latte', name: 'Catppuccin Latte', dark: false,
-    uiFont: 'Inter', codeFont: 'JetBrains Mono',
+    codeFont: 'JetBrains Mono',
     colors: {
       activity: '#dce0e8', sidebar: '#e6e9ef', editor: '#eff1f5', panel: '#e6e9ef',
       panelHeader: '#dce0e8', terminal: '#f7f8fa', terminalSidebar: '#dce0e8', surface: '#ccd0da',
@@ -103,7 +102,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'nord', name: 'Nord', dark: true,
-    uiFont: 'Inter', codeFont: 'IBM Plex Mono',
+    codeFont: 'IBM Plex Mono',
     colors: {
       activity: '#252d3b', sidebar: '#2e3747', editor: '#303b4d', panel: '#273242',
       panelHeader: '#39475a', terminal: '#242e3d', terminalSidebar: '#303c4d', surface: '#405066',
@@ -119,7 +118,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'tokyo-night', name: 'Tokyo Night', dark: true,
-    uiFont: 'Space Grotesk', codeFont: 'JetBrains Mono',
+    codeFont: 'JetBrains Mono',
     colors: {
       activity: '#13141f', sidebar: '#1a1b2b', editor: '#1a1b26', panel: '#161725',
       panelHeader: '#23243a', terminal: '#11121d', terminalSidebar: '#1b1c2c', surface: '#2b2d48',
@@ -135,7 +134,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'gruvbox-dark', name: 'Gruvbox Dark', dark: true,
-    uiFont: 'Space Grotesk', codeFont: 'IBM Plex Mono',
+    codeFont: 'IBM Plex Mono',
     colors: {
       activity: '#1d1b19', sidebar: '#282420', editor: '#282828', panel: '#24211e',
       panelHeader: '#39312a', terminal: '#1e1c1a', terminalSidebar: '#302a24', surface: '#453b32',
@@ -151,7 +150,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'rose-pine', name: 'Rosé Pine', dark: true,
-    uiFont: 'Space Grotesk', codeFont: 'Fira Code',
+    codeFont: 'Fira Code',
     colors: {
       activity: '#15131d', sidebar: '#1d1b27', editor: '#191724', panel: '#211f2c',
       panelHeader: '#2b2938', terminal: '#14121c', terminalSidebar: '#242230', surface: '#393644',
@@ -167,7 +166,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'solarized-light', name: 'Solarized Light', dark: false,
-    uiFont: 'Inter', codeFont: 'IBM Plex Mono',
+    codeFont: 'IBM Plex Mono',
     colors: {
       activity: '#e3d9bd', sidebar: '#eee5cb', editor: '#fdf6e3', panel: '#f2ead4',
       panelHeader: '#e8dec4', terminal: '#fff9e9', terminalSidebar: '#e9dfc7', surface: '#ddd2b7',
@@ -183,13 +182,13 @@ export const themes: Theme[] = [
   },
   {
     id: 'github-dark', name: 'GitHub Dark', dark: true,
-    uiFont: 'Inter', codeFont: 'JetBrains Mono',
+    codeFont: 'JetBrains Mono',
     colors: {
       activity: '#010409', sidebar: '#161b22', editor: '#0d1117', panel: '#0d1117',
       panelHeader: '#161b22', terminal: '#010409', terminalSidebar: '#161b22', surface: '#21262d',
       border: '#30363d', text: '#e6edf3', muted: '#b1bac4', subtle: '#8b949e',
       accent: '#2f81f7', accentText: '#ffffff', hover: '#21262d', selection: '#264f78',
-      gutter: '#8b949e', activeLine: '#161b22', warning: '#d29922', button: '#2f81f7',
+      gutter: '#8b949e', activeLine: '#161b22', warning: '#d29922', button: '#1f6feb',
     },
     syntax: {
       keyword: '#ff7b72', function: '#d2a8ff', variable: '#e6edf3', string: '#a5d6ff',
@@ -199,7 +198,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'matte-black', name: 'Matte Black', dark: true,
-    uiFont: 'Inter', codeFont: 'JetBrains Mono',
+    codeFont: 'JetBrains Mono',
     colors: {
       activity: '#050607', sidebar: '#0d0f11', editor: '#08090b', panel: '#0b0d0f',
       panelHeader: '#111417', terminal: '#050607', terminalSidebar: '#0d0f11', surface: '#1c2024',
@@ -227,7 +226,7 @@ export function themeVariables(theme: Theme, codeFont = theme.codeFont): CSSProp
     ...Object.fromEntries(
     Object.entries(theme.colors).map(([key, value]) => [`--${key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}`, value]),
     ),
-    '--ui-font': `'${theme.uiFont}', sans-serif`,
+    '--ui-font': "'Inter', sans-serif",
     '--code-font': `'${codeFont}', monospace`,
     '--success': theme.dark ? '#7dc995' : '#24743e',
     '--error': theme.dark ? '#f08b8b' : '#bc303e',

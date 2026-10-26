@@ -1,3 +1,4 @@
+import { shortcutLabel } from '../lib/platform';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { readDir } from '@tauri-apps/plugin-fs';
 
@@ -89,7 +90,7 @@ const QuickOpen = forwardRef<QuickOpenHandle, Props>(function QuickOpen({ rootPa
         if (event.key === 'ArrowUp') { event.preventDefault(); setSelected(index => Math.max(0, index - 1)); }
         if (event.key === 'Enter' && matches[selected]) { event.preventDefault(); choose(matches[selected]); }
       }} />
-    <kbd>Ctrl+P</kbd>
+    <kbd>{shortcutLabel('P')}</kbd>
     {open && <div className="quick-open-results" id="quick-open-results" role="listbox" aria-label="Matching files">
       {loading && <div className="quick-open-hint">Finding files in this folder…</div>}
       {!loading && matches.length === 0 && <div className="quick-open-hint">{query ? 'No matching files' : 'Type to search files'}</div>}
