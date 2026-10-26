@@ -981,6 +981,7 @@ export default function App() {
                           content={file.content}
                           path={file.path}
                           tabId={file.id}
+                          fontSize={fontSize}
                           onOpenFile={path => { void handleOpenFile(path); }}
                           onClose={() => closePane(pane.id)}
                           onActivate={() => selectPane(pane.id)}

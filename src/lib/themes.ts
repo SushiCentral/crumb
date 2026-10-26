@@ -229,12 +229,15 @@ export function themeVariables(theme: Theme, codeFont = theme.codeFont): CSSProp
     ),
     '--ui-font': `'${theme.uiFont}', sans-serif`,
     '--code-font': `'${codeFont}', monospace`,
-    '--label-heading': `color-mix(in srgb, ${theme.syntax.keyword} 80%, ${theme.colors.text})`,
-    '--label-active': `color-mix(in srgb, ${theme.colors.accent} 85%, ${theme.colors.text})`,
-    '--label-detail': theme.id === 'solarized-light'
-      ? '#346767'
-      : `color-mix(in srgb, ${theme.syntax.operator} 60%, ${theme.colors.text})`,
-    '--label-context': `color-mix(in srgb, ${theme.syntax.type} 70%, ${theme.colors.text})`,
-    '--label-inactive': `color-mix(in srgb, ${theme.colors.muted} 72%, ${theme.syntax.keyword})`,
+    '--success': theme.dark ? '#7dc995' : '#24743e',
+    '--error': theme.dark ? '#f08b8b' : '#bc303e',
+    '--overlay': theme.dark ? '#0008' : '#0003',
+    '--popup-shadow': theme.dark ? '0 12px 36px #0006' : '0 12px 36px #0002',
+    // UI hierarchy is independent of the code syntax palette.
+    '--label-heading': theme.colors.text,
+    '--label-active': theme.colors.text,
+    '--label-detail': theme.colors.muted,
+    '--label-context': theme.colors.muted,
+    '--label-inactive': theme.colors.muted,
   } as CSSProperties;
 }
