@@ -735,7 +735,11 @@ export default function App() {
       // sidebar inputs included) owns these Ctrl bindings. Returning without
       // preventDefault/stopPropagation lets xterm's PTY or the input handle the
       // key; Ctrl-S and other global shortcuts still fall through to App below.
-      if ((focusedSurface === 'terminal' || focusedSurface === 'input') && isInputOwnedVimCtrlKey(e)) return;
+      const togglesTerminal = focusedSurface === 'terminal'
+        && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey
+        && e.key.toLowerCase() === 'j';
+      if ((focusedSurface === 'terminal' || focusedSurface === 'input')
+        && !togglesTerminal && isInputOwnedVimCtrlKey(e)) return;
 
       const scaling = scaleShortcut(e);
       if (scaling) {

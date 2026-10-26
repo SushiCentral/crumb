@@ -14,7 +14,6 @@ const TERMINAL_KEYS = [
   { key: 'Control+b', label: 'Ctrl-B', data: '\u0002' },
   { key: 'Control+n', label: 'Ctrl-N', data: '\u000e' },
   { key: 'Control+p', label: 'Ctrl-P', data: '\u0010' },
-  { key: 'Control+j', label: 'Ctrl-J', data: '\n' },
 ];
 
 async function focusTerminal(page: Page): Promise<void> {
@@ -58,14 +57,22 @@ test.describe('terminal focus owns its Ctrl bindings', () => {
       if (key === 'Control+b') {
         await expect(page.getByRole('button', { name: 'Toggle file explorer' })).toHaveClass(/active/);
       }
-      if (key === 'Control+j') {
-        await expect(page.locator('.bottom-panel-container')).toBeVisible();
-      }
       if (key === 'Control+p') {
         await expect(page.getByRole('combobox', { name: 'Search files' })).not.toBeFocused();
       }
     });
   }
+});
+
+test('Ctrl-J closes the terminal even when terminal input is focused', async ({ page }) => {
+  await openApp(page, { vim: true });
+  await newFile(page);
+  await focusTerminal(page);
+
+  await page.keyboard.press('Control+j');
+
+  await expect(page.locator('.bottom-panel-container')).toBeHidden();
+  expect((await appStub(page)).ptyInput.join('')).not.toContain('\n');
 });
 
 test('terminal focus keeps global Ctrl-Shift-P and Ctrl-S shortcuts', async ({ page }) => {
@@ -203,7 +210,7 @@ test.describe('ordinary text input focus owns conflicting Ctrl bindings', () => 
   });
 });
 
-test('a focused Vim editor keeps Ctrl-W/O/N out of App actions', async ({ page }) => {
+test('a focused Vim editor keeps Ctrl-W/O out of App actions and Ctrl-N creates a tab', async ({ page }) => {
   await openApp(page, { vim: true });
   await newFile(page);
   await focusEditor(page);
@@ -216,7 +223,7 @@ test('a focused Vim editor keeps Ctrl-W/O/N out of App actions', async ({ page }
   await expect(page.locator('.editor-tab')).toHaveCount(1);
 
   await page.keyboard.press('Control+n');
-  await expect(page.locator('.editor-tab')).toHaveCount(1);
+  await expect(page.locator('.editor-tab')).toHaveCount(2);
   await expect(page.locator('.vim-status')).toHaveAttribute('aria-label', 'Vim mode: normal');
 });
 

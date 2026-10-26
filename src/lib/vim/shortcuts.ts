@@ -39,8 +39,6 @@ const VIM_BUILTIN_CTRL_KEYS: ReadonlySet<string> = new Set([
   'w', // Vim window prefix; must never close a Crumb tab
   'o', // jump list backward
   'b', // page backward
-  'n', // next line / completion
-  'p', // previous line / completion
   'j', // line down
 ]);
 
