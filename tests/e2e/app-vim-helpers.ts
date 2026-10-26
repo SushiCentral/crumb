@@ -26,6 +26,7 @@ export interface StubSnapshot {
   writeCalls: StubWrite[];
   pendingWrites: number;
   pendingSaveDialogs: number;
+  pendingReads: number;
   openCalls: number;
   saveCalls: number;
   spawnCalls: number;
@@ -46,6 +47,7 @@ export async function openApp(page: Page, options: AppStubOptions = {}): Promise
       saveResult: opts.saveResult ?? null,
       holdWrites: false,
       holdSaveDialog: false,
+      holdReads: false,
       failNextWrite: null as string | null,
       writeCalls: [] as StubWrite[],
       pendingWrites: [] as Array<{
@@ -56,6 +58,10 @@ export async function openApp(page: Page, options: AppStubOptions = {}): Promise
       pendingSaveDialogs: [] as Array<{
         resolve: (value: string | null) => void;
       }>,
+      pendingReads: [] as Array<{
+        path: string;
+        resolve: () => void;
+      }>,
       calls: [] as Array<{ command: string; args?: unknown; options?: unknown }>,
       ptyInput: [] as string[],
       callbackId: 0,
@@ -65,11 +71,32 @@ export async function openApp(page: Page, options: AppStubOptions = {}): Promise
       writeCalls: state.writeCalls.map(call => ({ ...call })),
       pendingWrites: state.pendingWrites.length,
       pendingSaveDialogs: state.pendingSaveDialogs.length,
+      pendingReads: state.pendingReads.length,
       openCalls: state.calls.filter(call => call.command === 'plugin:dialog|open').length,
       saveCalls: state.calls.filter(call => call.command === 'plugin:dialog|save').length,
       spawnCalls: state.calls.filter(call => call.command === 'spawn_pty').length,
       ptyInput: [...state.ptyInput],
     });
+
+    const directoryEntries = (directory: string) => {
+      const prefix = directory.endsWith('/') || directory.endsWith('\\')
+        ? directory
+        : `${directory}/`;
+      const directories = new Set<string>();
+      const files: Array<{ name: string; isFile: boolean; isDirectory: boolean; isSymlink: boolean }> = [];
+      for (const filePath of Object.keys(state.files)) {
+        if (!filePath.startsWith(prefix)) continue;
+        const relative = filePath.slice(prefix.length);
+        if (!relative) continue;
+        const slash = relative.indexOf('/');
+        if (slash < 0) files.push({ name: relative, isFile: true, isDirectory: false, isSymlink: false });
+        else directories.add(relative.slice(0, slash));
+      }
+      return [
+        ...Array.from(directories).map(name => ({ name, isFile: false, isDirectory: true, isSymlink: false })),
+        ...files,
+      ];
+    };
 
     (window as unknown as Record<string, unknown>).__crumbTest = {
       snapshot,
@@ -84,6 +111,13 @@ export async function openApp(page: Page, options: AppStubOptions = {}): Promise
       },
       setHoldSaveDialog(value: boolean) {
         state.holdSaveDialog = value;
+      },
+      setHoldReads(value: boolean) {
+        state.holdReads = value;
+      },
+      releaseReads() {
+        const pending = state.pendingReads.splice(0);
+        for (const read of pending) read.resolve();
       },
       resolveSaveDialog(path: string | null, index = 0) {
         const pending = state.pendingSaveDialogs[index];
@@ -134,10 +168,22 @@ export async function openApp(page: Page, options: AppStubOptions = {}): Promise
           const path = (args as { path?: string } | undefined)?.path ?? '';
           const content = state.files[path];
           if (content === undefined) return Promise.reject(new Error(`No fixture for ${path}`));
-          return Promise.resolve(Array.from(new TextEncoder().encode(content)));
+          const bytes = Array.from(new TextEncoder().encode(content));
+          if (state.holdReads) {
+            return new Promise<number[]>((resolve) => {
+              state.pendingReads.push({ path, resolve: () => resolve(bytes) });
+            });
+          }
+          return Promise.resolve(bytes);
+        }
+        if (command === 'plugin:fs|read_dir') {
+          const path = (args as { path?: string } | undefined)?.path ?? '';
+          return Promise.resolve(directoryEntries(path));
         }
         if (command === 'plugin:fs|stat') {
-          return Promise.resolve({ isFile: true, isDirectory: false, isSymlink: false, size: 0, mtime: null, atime: null, birthtime: null, readonly: false, fileAttributes: 0, dev: 0, ino: 0, mode: 0, nlink: 0, uid: 0, gid: 0, rdev: 0, blksize: 0, blocks: 0 });
+          const path = (args as { path?: string } | undefined)?.path ?? '';
+          const content = state.files[path];
+          return Promise.resolve({ isFile: true, isDirectory: false, isSymlink: false, size: content === undefined ? 0 : new TextEncoder().encode(content).length, mtime: null, atime: null, birthtime: null, readonly: false, fileAttributes: 0, dev: 0, ino: 0, mode: 0, nlink: 0, uid: 0, gid: 0, rdev: 0, blksize: 0, blocks: 0 });
         }
         if (command === 'plugin:fs|write_text_file') {
           const headers = (options as { headers?: { path?: string } } | undefined)?.headers;

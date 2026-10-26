@@ -2,17 +2,22 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { readDir } from '@tauri-apps/plugin-fs';
 
 export interface QuickOpenHandle { focus: () => void }
+export type QuickOpenDismissReason = 'cancel' | 'outside';
 interface Props {
   rootPath: string | null;
   openPaths: string[];
   onOpenFile: (path: string) => void;
+  /** Remember the surface that owned focus when this field was entered. */
+  onActivate?: () => void;
+  /** Reported when the field closes without opening a file. */
+  onDismiss?: (reason: QuickOpenDismissReason) => void;
 }
 
 const ignoredDirectories = new Set(['.git', 'node_modules', 'target', 'dist', 'build', '.next', '.venv', 'vendor']);
 const joinPath = (parent: string, name: string) => `${parent}${parent.endsWith('/') || parent.endsWith('\\') ? '' : parent.includes('\\') ? '\\' : '/'}${name}`;
 const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
-const QuickOpen = forwardRef<QuickOpenHandle, Props>(function QuickOpen({ rootPath, openPaths, onOpenFile }, ref) {
+const QuickOpen = forwardRef<QuickOpenHandle, Props>(function QuickOpen({ rootPath, openPaths, onOpenFile, onActivate, onDismiss }, ref) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState(0);
@@ -55,11 +60,16 @@ const QuickOpen = forwardRef<QuickOpenHandle, Props>(function QuickOpen({ rootPa
   useEffect(() => {
     if (!open) return;
     const dismiss = (event: PointerEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+      if (containerRef.current?.contains(event.target as Node)) return;
+      // An outside click belongs to the clicked control; release focus rather
+      // than pulling it back to the editor when the field hides.
+      setOpen(false);
+      inputRef.current?.blur();
+      onDismiss?.('outside');
     };
     document.addEventListener('pointerdown', dismiss);
     return () => document.removeEventListener('pointerdown', dismiss);
-  }, [open]);
+  }, [open, onDismiss]);
 
   const matches = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -81,10 +91,15 @@ const QuickOpen = forwardRef<QuickOpenHandle, Props>(function QuickOpen({ rootPa
     <svg className="quick-open-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.5" /><path d="m16 16 5 5" /></svg>
     <input ref={inputRef} value={query} aria-label="Search files" role="combobox" aria-expanded={open} aria-controls="quick-open-results"
       placeholder={rootPath ? 'Search files by name' : 'Search open files'}
-      onFocus={() => { setIndexedRoot(null); setOpen(true); }}
+      onFocus={() => { onActivate?.(); setIndexedRoot(null); setOpen(true); }}
       onChange={event => { setQuery(event.target.value); setSelected(0); setOpen(true); }}
       onKeyDown={event => {
-        if (event.key === 'Escape') { event.preventDefault(); setOpen(false); inputRef.current?.blur(); }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          setOpen(false);
+          inputRef.current?.blur();
+          onDismiss?.('cancel');
+        }
         if (event.key === 'ArrowDown') { event.preventDefault(); setSelected(index => Math.min(index + 1, matches.length - 1)); }
         if (event.key === 'ArrowUp') { event.preventDefault(); setSelected(index => Math.max(0, index - 1)); }
         if (event.key === 'Enter' && matches[selected]) { event.preventDefault(); choose(matches[selected]); }

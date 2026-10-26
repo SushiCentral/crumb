@@ -9,6 +9,13 @@ export interface PaletteCommand {
   run: () => void;
 }
 
+/**
+ * Why the palette closed. Focus is returned to the invoking editor only for an
+ * explicit cancel or an inline selection; an outside click belongs to the
+ * element the user chose, and a command owns its own focus handoff.
+ */
+export type CommandPaletteCloseReason = 'cancel' | 'outside' | 'selection' | 'command';
+
 interface Props {
   commands: PaletteCommand[];
   themes: Theme[];
@@ -16,10 +23,12 @@ interface Props {
   codeFontOverride: string | null;
   onThemeChange: (id: string) => void;
   onCodeFontChange: (font: typeof codeFonts[number] | null) => void;
-  onClose: () => void;
+  onClose: (reason: CommandPaletteCloseReason) => void;
+  /** Runs a command after the palette has released focus. */
+  onRunCommand?: (command: PaletteCommand) => void;
 }
 
-export default function CommandPalette({ commands, themes, currentThemeId, codeFontOverride, onThemeChange, onCodeFontChange, onClose }: Props) {
+export default function CommandPalette({ commands, themes, currentThemeId, codeFontOverride, onThemeChange, onCodeFontChange, onClose, onRunCommand }: Props) {
   const [mode, setMode] = useState<'commands' | 'themes' | 'fonts'>('commands');
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -45,20 +54,26 @@ export default function CommandPalette({ commands, themes, currentThemeId, codeF
     if (!choice) return;
     if (mode === 'themes') {
       onThemeChange((choice as Theme).id);
-      onClose();
+      onClose('selection');
     } else if (mode === 'fonts') {
       onCodeFontChange(choice === 'Theme default' ? null : choice as typeof codeFonts[number]);
-      onClose();
+      onClose('selection');
     } else {
       const command = choice as PaletteCommand;
       if (command.id === 'theme') changeMode('themes');
       else if (command.id === 'code-font') changeMode('fonts');
-      else { onClose(); command.run(); }
+      else {
+        onClose('command');
+        if (onRunCommand) onRunCommand(command);
+        else command.run();
+      }
     }
   };
 
   return (
-    <div className="palette-overlay" onMouseDown={onClose}>
+    <div className="palette-overlay" onMouseDown={event => {
+      if (event.target === event.currentTarget) onClose('outside');
+    }}>
       <div
         className="command-palette"
         role="dialog"
@@ -66,7 +81,7 @@ export default function CommandPalette({ commands, themes, currentThemeId, codeF
         aria-label="Command palette"
         onMouseDown={event => event.stopPropagation()}
         onKeyDown={event => {
-          if (event.key === 'Escape') { event.preventDefault(); onClose(); }
+          if (event.key === 'Escape') { event.preventDefault(); onClose('cancel'); }
           if (event.key === 'Tab') { event.preventDefault(); inputRef.current?.focus(); }
         }}
       >

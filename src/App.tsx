@@ -15,11 +15,11 @@ import Editor, { type EditorHandle } from "./components/Editor";
 import BottomPanel from "./components/BottomPanel";
 import FileExplorer from "./components/FileExplorer";
 import SearchPanel from "./components/SearchPanel";
-import SettingsModal from "./components/SettingsModal";
+import SettingsModal, { type SettingsCloseReason } from "./components/SettingsModal";
 import WelcomeScreen from "./components/WelcomeScreen";
 import ToastContainer, { type ToastMessage } from "./components/Toast";
-import CommandPalette, { type PaletteCommand } from "./components/CommandPalette";
-import QuickOpen, { type QuickOpenHandle } from "./components/QuickOpen";
+import CommandPalette, { type PaletteCommand, type CommandPaletteCloseReason } from "./components/CommandPalette";
+import QuickOpen, { type QuickOpenHandle, type QuickOpenDismissReason } from "./components/QuickOpen";
 import { codeFonts, getTheme, themes, themeVariables } from "./lib/themes";
 import { languageName } from "./lib/languages";
 import { FolderIcon, SearchIcon, SettingsIcon, SplitPreviewIcon } from "./components/Icons";
@@ -115,6 +115,15 @@ interface PendingCloseOperation {
   index: number;
 }
 
+/**
+ * A deferred focus destination. Pane IDs are exact; tab IDs let a newly opened
+ * document resolve its pane after React mounts the destination EditorView.
+ */
+interface EditorFocusTarget {
+  paneId?: string | null;
+  tabId?: string | null;
+}
+
 const newUntitledTab = (): EditorTab => ({
   id: crypto.randomUUID(), path: null, content: initialDoc, savedContent: initialDoc,
 });
@@ -192,6 +201,18 @@ export default function App() {
   const quickOpenRef = useRef<QuickOpenHandle>(null);
   const sidebarDraggingRef = useRef(false);
   const panelDraggingRef = useRef(false);
+
+  // Focus restoration is intent-based: remember which editor invoked the
+  // surface, and only move focus when the user cancels or runs a command that
+  // does not hand off to another destination.
+  const focusInvokerPaneRef = useRef<string | null>(null);
+  const lastFocusedEditorPaneRef = useRef<string | null>(null);
+  const pendingEditorFocusRef = useRef<{ token: number; target: EditorFocusTarget } | null>(null);
+  const editorFocusTokenRef = useRef(0);
+  const programmaticEditorFocusRef = useRef(false);
+  // Monotonic user-interaction clock. Asynchronous handlers capture this before
+  // awaiting and validate it before moving focus when they finish.
+  const userInteractionEpochRef = useRef(0);
 
   const currentDragWidthRef = useRef<number>(sidebarWidth);
   const currentDragHeightRef = useRef<number>(panelHeight);
@@ -336,8 +357,151 @@ export default function App() {
     if (editor) editorRefs.current.get(editor.id)?.focus();
   };
 
-  const openInSplit = (tabId: string, kind: EditorPane['kind'] = 'editor') => {
-    if (tabsRef.current.length === 0) return;
+  const editorPaneForTarget = (target: EditorFocusTarget = {}): EditorPane | undefined => {
+    const panes = panesRef.current;
+    if (target.paneId) {
+      return panes.find(pane => pane.id === target.paneId && pane.kind === 'editor');
+    }
+    if (target.tabId) {
+      return panes.find(pane => pane.kind === 'editor' && pane.tabId === target.tabId)
+        ?? panes.find(pane => pane.kind === 'editor' && pane.tabIds.includes(target.tabId!));
+    }
+    return panes.find(pane => pane.id === activePaneIdRef.current && pane.kind === 'editor')
+      ?? panes.find(pane => pane.kind === 'editor');
+  };
+
+  const paneElement = (paneId: string) =>
+    workspaceRef.current?.querySelector<HTMLElement>(`[data-pane-id="${paneId}"]`) ?? null;
+
+  const cancelPendingEditorFocus = () => {
+    editorFocusTokenRef.current += 1;
+    pendingEditorFocusRef.current = null;
+  };
+
+  /**
+   * Focus an editor only once its EditorView is mounted. The pending request is
+   * invalidated by any later user focus interaction, so a stale tab click or
+   * pointer press wins over an older deferred restoration.
+   */
+  const requestEditorFocus = (target: EditorFocusTarget, interactionEpoch?: number) => {
+    if (interactionEpoch !== undefined && interactionEpoch !== userInteractionEpochRef.current) return;
+    // A caller that captured the interaction epoch has already validated that
+    // no newer pointer/focus decision occurred. In that case a focused source
+    // control (for example the Explorer row that opened the file) is the
+    // intent itself, not evidence that the user moved elsewhere.
+    const intentValidated = interactionEpoch !== undefined;
+    const token = editorFocusTokenRef.current + 1;
+    editorFocusTokenRef.current = token;
+    pendingEditorFocusRef.current = { token, target };
+    let attempts = 0;
+
+    const attempt = () => {
+      if (editorFocusTokenRef.current !== token) return;
+      const pane = editorPaneForTarget(target);
+      const element = pane ? paneElement(pane.id) : null;
+      const active = document.activeElement;
+      const focusMovedElsewhere = !intentValidated
+        && active instanceof HTMLElement
+        && active !== document.body
+        && !element?.contains(active);
+      if (focusMovedElsewhere) {
+        // A click, Tab, or other focus request happened after the surface
+        // closed. Leave focus where the user put it.
+        pendingEditorFocusRef.current = null;
+        editorFocusTokenRef.current += 1;
+        return;
+      }
+
+      const handle = pane ? editorRefs.current.get(pane.id) : undefined;
+      if (handle) {
+        programmaticEditorFocusRef.current = true;
+        try { handle.focus(); } finally { programmaticEditorFocusRef.current = false; }
+        const focused = document.activeElement;
+        if (focused instanceof Element && focused.closest('.cm-content') && (!element || element.contains(focused))) {
+          pendingEditorFocusRef.current = null;
+          return;
+        }
+      }
+
+      attempts += 1;
+      if (attempts < 90 && editorFocusTokenRef.current === token) {
+        setTimeout(attempt, 16);
+      } else if (editorFocusTokenRef.current === token) {
+        pendingEditorFocusRef.current = null;
+      }
+    };
+
+    // Let React unmount the closing palette/dialog before evaluating whether
+    // focus was already claimed by another control.
+    setTimeout(attempt, 0);
+  };
+
+  const focusedEditorPaneId = (): string | null => {
+    const active = document.activeElement;
+    const owner = active instanceof Element ? active.closest<HTMLElement>('[data-pane-id]') : null;
+    const focusedPaneId = owner?.dataset.paneId;
+    if (focusedPaneId && panesRef.current.some(pane => pane.id === focusedPaneId && pane.kind === 'editor')) {
+      return focusedPaneId;
+    }
+    const activePane = panesRef.current.find(pane => pane.id === activePaneIdRef.current && pane.kind === 'editor');
+    if (activePane) return activePane.id;
+    const lastFocused = panesRef.current.find(pane => pane.id === lastFocusedEditorPaneRef.current && pane.kind === 'editor');
+    if (lastFocused) return lastFocused.id;
+    return panesRef.current.find(pane => pane.kind === 'editor')?.id ?? null;
+  };
+
+  const rememberFocusInvoker = (): string | null => {
+    focusInvokerPaneRef.current = focusedEditorPaneId();
+    return focusInvokerPaneRef.current;
+  };
+
+  const restoreInvokerFocus = () => {
+    if (focusInvokerPaneRef.current) requestEditorFocus({ paneId: focusInvokerPaneRef.current });
+  };
+
+  const openPalette = () => {
+    rememberFocusInvoker();
+    setIsPaletteOpen(true);
+  };
+
+  const closePalette = (reason: CommandPaletteCloseReason) => {
+    setIsPaletteOpen(false);
+    if (reason === 'cancel' || reason === 'selection') restoreInvokerFocus();
+  };
+
+  const openSettings = (preserveInvoker = false) => {
+    if (!preserveInvoker) rememberFocusInvoker();
+    setIsSettingsOpen(true);
+  };
+
+  const closeSettings = (reason: SettingsCloseReason) => {
+    setIsSettingsOpen(false);
+    if (reason === 'cancel') restoreInvokerFocus();
+  };
+
+  const focusSearchInput = () => {
+    const token = editorFocusTokenRef.current + 1;
+    editorFocusTokenRef.current = token;
+    pendingEditorFocusRef.current = null;
+    const interactionEpoch = userInteractionEpochRef.current;
+    // SearchPanel focuses on mount; this covers an already-mounted panel whose
+    // input lost focus to the command palette.
+    requestAnimationFrame(() => {
+      if (editorFocusTokenRef.current !== token || userInteractionEpochRef.current !== interactionEpoch) return;
+      const input = document.querySelector<HTMLInputElement>('.search-input');
+      if (!input) return;
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active.closest('.settings-overlay')) return;
+      input.focus();
+    });
+  };
+
+  const dismissQuickOpen = (reason: QuickOpenDismissReason) => {
+    if (reason === 'cancel') restoreInvokerFocus();
+  };
+
+  const openInSplit = (tabId: string, kind: EditorPane['kind'] = 'editor'): string => {
+    if (tabsRef.current.length === 0) return '';
     const pane: EditorPane = { id: crypto.randomUUID(), tabId, tabIds: kind === 'editor' ? [tabId] : [], kind };
     updatePanes(current => {
       const index = current.findIndex(item => item.id === activePaneIdRef.current);
@@ -346,6 +510,7 @@ export default function App() {
       return next;
     });
     selectPane(pane.id);
+    return pane.id;
   };
 
   const closePane = (paneId: string) => {
@@ -447,7 +612,7 @@ export default function App() {
     }
   };
 
-  const handleChooseFolder = async () => {
+  const handleChooseFolder = async (): Promise<boolean> => {
     try {
       const selected = await open({ directory: true, multiple: false });
       if (typeof selected === 'string') {
@@ -455,15 +620,19 @@ export default function App() {
         setIsSidebarOpen(true);
         setSidebarTab('explorer');
         addToast(`Opened workspace: ${getFileNameFromPath(selected)}`, 'info');
+        return true;
       }
+      return false;
     } catch (err) {
       addToast(`Could not open folder: ${String(err)}`, 'error');
+      return false;
     }
   };
 
-  const handleOpenFile = async (path?: string, split = false, lineNumber?: number) => {
+  const handleOpenFile = async (path?: string, split = false, lineNumber?: number): Promise<boolean> => {
     try {
       let selectedPath = typeof path === "string" ? path : null;
+      let intentEpoch = userInteractionEpochRef.current;
       if (!selectedPath) {
         const selected = await open({
           multiple: false,
@@ -471,9 +640,12 @@ export default function App() {
         });
 
         if (typeof selected !== "string") {
-          return;
+          return false;
         }
         selectedPath = selected;
+        // The native dialog's own focus changes are part of this intent; a
+        // later page interaction, not the dialog, invalidates the focus handoff.
+        intentEpoch = userInteractionEpochRef.current;
       }
 
       const existing = tabsRef.current.find(tab => tab.path === selectedPath);
@@ -483,9 +655,10 @@ export default function App() {
       if (existing) {
         targetTabId = existing.id;
         if (split) {
-          openInSplit(existing.id);
+          targetPaneId = openInSplit(existing.id);
         } else {
           activateTab(existing.id);
+          targetPaneId = activePaneIdRef.current;
         }
       } else {
         const content = await readTextFile(selectedPath);
@@ -504,24 +677,33 @@ export default function App() {
         } else {
           updateTabs(current => [...current, newTab]);
           if (split) {
-            openInSplit(newTab.id);
+            targetPaneId = openInSplit(newTab.id);
           } else {
             activateTab(newTab.id);
+            targetPaneId = activePaneIdRef.current;
           }
         }
       }
 
+      // Wait for the destination pane's EditorView rather than assuming the
+      // view exists in the same turn the file is activated. The captured
+      // interaction epoch prevents a read that finishes after the user has
+      // clicked or focused elsewhere from stealing focus.
+      requestEditorFocus({ paneId: targetPaneId, tabId: targetTabId }, intentEpoch);
       if (lineNumber != null) {
         setTimeout(() => {
+          if (intentEpoch !== userInteractionEpochRef.current) return;
           const pane = panesRef.current.find(p => p.id === targetPaneId && p.kind === 'editor') ?? panesRef.current.find(p => p.tabId === targetTabId && p.kind === 'editor');
           if (pane) {
             editorRefs.current.get(pane.id)?.jumpToLine(lineNumber);
           }
         }, 100);
       }
+      return true;
     } catch (error) {
       console.error("Failed to open file:", error);
       addToast(`Could not open file: ${String(error)}`, 'error');
+      return false;
     }
   };
 
@@ -588,10 +770,12 @@ export default function App() {
 
   const addUntitledTab = () => {
     const tab = newUntitledTab();
+    let targetPaneId = '';
     if (tabsRef.current.length === 0 || panesRef.current.length === 0) {
       const newPane: EditorPane = { id: crypto.randomUUID(), tabId: tab.id, tabIds: [tab.id], kind: 'editor' };
       updateTabs(() => [tab]);
       updatePanes(() => [newPane]);
+      targetPaneId = newPane.id;
       activeTabIdRef.current = tab.id;
       setActiveTabId(tab.id);
       activePaneIdRef.current = newPane.id;
@@ -599,8 +783,9 @@ export default function App() {
     } else {
       updateTabs(current => [...current, tab]);
       activateTab(tab.id);
+      targetPaneId = activePaneIdRef.current;
     }
-    setTimeout(focusActiveEditor, 50);
+    requestEditorFocus({ paneId: targetPaneId, tabId: tab.id });
   };
 
   const requestCloseTabs = (tabIdsToClose: string[], paneId: string) => {
@@ -701,6 +886,32 @@ export default function App() {
     removeUnavailablePreviews();
   };
 
+  // A deferred restoration must never outlive a newer user focus decision.
+  // Capture pointer presses and focus moves while a request is pending; only
+  // focus that lands inside the requested editor is ignored.
+  useEffect(() => {
+    const cancelOnInteraction = () => {
+      userInteractionEpochRef.current += 1;
+      if (pendingEditorFocusRef.current) cancelPendingEditorFocus();
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      if (programmaticEditorFocusRef.current) return;
+      userInteractionEpochRef.current += 1;
+      const pending = pendingEditorFocusRef.current;
+      if (!pending) return;
+      const pane = editorPaneForTarget(pending.target);
+      const element = pane ? paneElement(pane.id) : null;
+      if (element && event.target instanceof Node && element.contains(event.target)) return;
+      cancelPendingEditorFocus();
+    };
+    window.addEventListener('pointerdown', cancelOnInteraction, true);
+    window.addEventListener('focusin', onFocusIn, true);
+    return () => {
+      window.removeEventListener('pointerdown', cancelOnInteraction, true);
+      window.removeEventListener('focusin', onFocusIn, true);
+    };
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const focusedElement = document.activeElement;
@@ -763,7 +974,12 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "p") {
         e.preventDefault();
         e.stopPropagation();
-        setIsPaletteOpen(open => !open);
+        if (isPaletteOpen) {
+          setIsPaletteOpen(false);
+          restoreInvokerFocus();
+        } else {
+          openPalette();
+        }
         return;
       }
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "f") {
@@ -771,12 +987,18 @@ export default function App() {
         e.stopPropagation();
         setIsSidebarOpen(true);
         setSidebarTab('search');
+        focusSearchInput();
         return;
       }
       if ((e.metaKey || e.ctrlKey) && e.key === ',') {
         e.preventDefault();
         e.stopPropagation();
-        setIsSettingsOpen(open => !open);
+        if (isSettingsOpen) {
+          setIsSettingsOpen(false);
+          restoreInvokerFocus();
+        } else {
+          openSettings();
+        }
         return;
       }
       if (isPaletteOpen || isSettingsOpen) return;
@@ -784,6 +1006,7 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         e.stopPropagation();
+        rememberFocusInvoker();
         quickOpenRef.current?.focus();
         return;
       }
@@ -854,38 +1077,38 @@ export default function App() {
   }, [editorPreferences.vimModeEnabled, isPaletteOpen, isSettingsOpen, isPanelOpen, currentPendingCloseId, isCloseAllConfirmationOpen]);
 
   const commands: PaletteCommand[] = [
-    { id: 'settings', label: 'Preferences: Open Settings', shortcut: 'Ctrl/Cmd ,', run: () => setIsSettingsOpen(true) },
+    { id: 'settings', label: 'Preferences: Open Settings', shortcut: 'Ctrl/Cmd ,', run: () => openSettings(true) },
     { id: 'theme', label: 'Preferences: Color Theme', detail: `Current: ${theme.name}`, run: () => {} },
     { id: 'code-font', label: 'Preferences: Editor Font', detail: `Current: ${codeFont}`, run: () => {} },
-    { id: 'search-files', label: 'View: Find in Files (Search)', shortcut: 'Ctrl/Cmd Shift F', run: () => { setIsSidebarOpen(true); setSidebarTab('search'); } },
-    { id: 'terminal', label: isPanelOpen ? 'View: Hide Terminal' : 'View: Show Terminal', shortcut: 'Ctrl/Cmd J', run: () => setIsPanelOpen(value => !value) },
-    { id: 'explorer', label: isSidebarOpen ? 'View: Hide File Tree' : 'View: Show File Tree', shortcut: 'Ctrl/Cmd B', run: () => setIsSidebarOpen(value => !value) },
-    { id: 'word-wrap', label: wordWrap ? 'Editor: Disable Word Wrap' : 'Editor: Enable Word Wrap', detail: wordWrap ? 'Wrapping is on' : 'Wrapping is off', run: () => setWordWrap(value => !value) },
-    { id: 'vim-mode', label: editorPreferences.vimModeEnabled ? 'Editor: Disable Vim Mode' : 'Editor: Enable Vim Mode', detail: editorPreferences.vimModeEnabled ? 'Vim mode is on' : 'Vim mode is off', run: () => setEditorPreferences(current => ({ ...current, vimModeEnabled: !current.vimModeEnabled })) },
-    ...(activeTab ? [{ id: 'split-editor', label: 'Editor: Open Active File in Split View', run: () => openInSplit(activeTab.id) }] : []),
-    ...(canPreviewMarkdown ? [{ id: 'markdown-preview', label: isPreviewOpen ? 'Markdown: Hide Preview' : 'Markdown: Open Preview to Side', run: toggleMarkdownPreview }] : []),
-    { id: 'font-up', label: 'Appearance: Increase Font Size', detail: `Currently ${fontSize}px`, run: () => setFontSize(value => Math.min(24, value + 1)) },
-    { id: 'font-down', label: 'Appearance: Decrease Font Size', detail: `Currently ${fontSize}px`, run: () => setFontSize(value => Math.max(10, value - 1)) },
-    { id: 'font-reset', label: 'Appearance: Reset Font Size', detail: '13px', run: () => setFontSize(13) },
-    { id: 'open', label: 'File: Open File', shortcut: 'Ctrl/Cmd O', run: () => void handleOpenFile() },
-    { id: 'open-folder', label: 'File: Open Folder / Project', run: () => void handleChooseFolder() },
+    { id: 'search-files', label: 'View: Find in Files (Search)', shortcut: 'Ctrl/Cmd Shift F', run: () => { setIsSidebarOpen(true); setSidebarTab('search'); focusSearchInput(); } },
+    { id: 'terminal', label: isPanelOpen ? 'View: Hide Terminal' : 'View: Show Terminal', shortcut: 'Ctrl/Cmd J', run: () => { setIsPanelOpen(value => !value); restoreInvokerFocus(); } },
+    { id: 'explorer', label: isSidebarOpen ? 'View: Hide File Tree' : 'View: Show File Tree', shortcut: 'Ctrl/Cmd B', run: () => { setIsSidebarOpen(value => !value); restoreInvokerFocus(); } },
+    { id: 'word-wrap', label: wordWrap ? 'Editor: Disable Word Wrap' : 'Editor: Enable Word Wrap', detail: wordWrap ? 'Wrapping is on' : 'Wrapping is off', run: () => { setWordWrap(value => !value); restoreInvokerFocus(); } },
+    { id: 'vim-mode', label: editorPreferences.vimModeEnabled ? 'Editor: Disable Vim Mode' : 'Editor: Enable Vim Mode', detail: editorPreferences.vimModeEnabled ? 'Vim mode is on' : 'Vim mode is off', run: () => { setEditorPreferences(current => ({ ...current, vimModeEnabled: !current.vimModeEnabled })); restoreInvokerFocus(); } },
+    ...(activeTab ? [{ id: 'split-editor', label: 'Editor: Open Active File in Split View', run: () => { const paneId = openInSplit(activeTab.id); requestEditorFocus({ paneId, tabId: activeTab.id }); } }] : []),
+    ...(canPreviewMarkdown ? [{ id: 'markdown-preview', label: isPreviewOpen ? 'Markdown: Hide Preview' : 'Markdown: Open Preview to Side', run: () => { toggleMarkdownPreview(); restoreInvokerFocus(); } }] : []),
+    { id: 'font-up', label: 'Appearance: Increase Font Size', detail: `Currently ${fontSize}px`, run: () => { setFontSize(value => Math.min(24, value + 1)); restoreInvokerFocus(); } },
+    { id: 'font-down', label: 'Appearance: Decrease Font Size', detail: `Currently ${fontSize}px`, run: () => { setFontSize(value => Math.max(10, value - 1)); restoreInvokerFocus(); } },
+    { id: 'font-reset', label: 'Appearance: Reset Font Size', detail: '13px', run: () => { setFontSize(13); restoreInvokerFocus(); } },
+    { id: 'open', label: 'File: Open File', shortcut: 'Ctrl/Cmd O', run: () => { void handleOpenFile().then(opened => { if (!opened) restoreInvokerFocus(); }); } },
+    { id: 'open-folder', label: 'File: Open Folder / Project', run: () => { void handleChooseFolder().then(opened => { if (!opened) restoreInvokerFocus(); }); } },
     { id: 'quick-open', label: 'File: Search Files', shortcut: 'Ctrl/Cmd P', run: () => quickOpenRef.current?.focus() },
     { id: 'new', label: 'File: New File', shortcut: 'Ctrl/Cmd N', run: addUntitledTab },
-    ...(activeTab ? [{ id: 'save', label: 'File: Save File', shortcut: 'Ctrl/Cmd S', run: () => void handleSaveFile() }] : []),
-    { id: 'terminal-folder', label: 'File: Open Current Terminal Folder', run: () => void handleOpenTerminalFolder() },
+    ...(activeTab ? [{ id: 'save', label: 'File: Save File', shortcut: 'Ctrl/Cmd S', run: () => { void handleSaveFile().then(() => restoreInvokerFocus()); } }] : []),
+    { id: 'terminal-folder', label: 'File: Open Current Terminal Folder', run: () => { void handleOpenTerminalFolder(); restoreInvokerFocus(); } },
   ];
 
   return (
     <div className="app-shell" style={{ ...themeVariables(theme, codeFont), colorScheme: theme.dark ? 'dark' : 'light', height: "100vh", width: "100vw", display: "flex", flexDirection: "column", overflow: "hidden", backgroundColor: "var(--editor)", color: "var(--text)" }}>
       <header className="top-bar">
         <div className="top-bar-brand"><FolderIcon width={17} height={17} /><strong>crumb</strong></div>
-        <QuickOpen ref={quickOpenRef} rootPath={explorerRootPath} openPaths={tabs.flatMap(tab => tab.path ? [tab.path] : [])} onOpenFile={path => { void handleOpenFile(path); }} />
+        <QuickOpen ref={quickOpenRef} rootPath={explorerRootPath} openPaths={tabs.flatMap(tab => tab.path ? [tab.path] : [])} onOpenFile={path => { void handleOpenFile(path); }} onActivate={rememberFocusInvoker} onDismiss={dismissQuickOpen} />
         <div className="top-bar-actions">
           <span className="top-bar-workspace" title={explorerRootPath ?? 'No folder open'}>{explorerRootPath ? getFileNameFromPath(explorerRootPath) : 'No folder'}</span>
           <span className="top-bar-language" title="Current file language">{activeTab ? languageName(activeTab.path) : ''}</span>
           {canPreviewMarkdown && <button className={`markdown-preview-toggle ${isPreviewOpen ? 'active' : ''}`} aria-pressed={isPreviewOpen} title={isPreviewOpen ? 'Hide Markdown preview' : 'Open Markdown preview to the side'} onClick={toggleMarkdownPreview}><SplitPreviewIcon /><span>Preview</span></button>}
           {tabs.length > 0 && <button title="Close all editor tabs" onClick={closeAllTabsAndPanes}>Close All</button>}
-          <button title="Commands and themes (Ctrl/Cmd+Shift+P)" onClick={() => setIsPaletteOpen(true)}>Commands</button>
+          <button title="Commands and themes (Ctrl/Cmd+Shift+P)" onClick={openPalette}>Commands</button>
         </div>
       </header>
 
@@ -934,7 +1157,7 @@ export default function App() {
 
           {/* Settings Button */}
           <button
-            onClick={() => setIsSettingsOpen(true)}
+            onClick={() => openSettings()}
             title="Editor Settings (⌘,)"
             aria-label="Open settings"
             className="activity-btn activity-btn-settings"
@@ -944,7 +1167,7 @@ export default function App() {
 
           {/* Command Palette Trigger */}
           <button
-            onClick={() => setIsPaletteOpen(true)}
+            onClick={openPalette}
             title="Commands and themes (Ctrl/Cmd+Shift+P)"
             aria-label="Open command palette"
             className="activity-btn activity-btn-palette"
@@ -1049,9 +1272,9 @@ export default function App() {
               onNewFile={addUntitledTab}
               onOpenFile={handleOpenFile}
               onOpenFolder={handleChooseFolder}
-              onOpenSearch={() => { setIsSidebarOpen(true); setSidebarTab('search'); }}
-              onOpenPalette={() => setIsPaletteOpen(true)}
-              onOpenSettings={() => setIsSettingsOpen(true)}
+              onOpenSearch={() => { setIsSidebarOpen(true); setSidebarTab('search'); focusSearchInput(); }}
+              onOpenPalette={openPalette}
+              onOpenSettings={() => openSettings()}
               onToggleTerminal={() => setIsPanelOpen(v => !v)}
               recentProjects={recentProjects}
               onOpenProject={path => { void handleOpenRecentProject(path); }}
@@ -1142,7 +1365,10 @@ export default function App() {
                           onVimStateChange={reportVimState}
                           onChange={value => handleEditorChange(file.id, value)}
                           onSaveRequest={tabId => { void handleSaveFile(tabId); }}
-                          onFocus={() => selectPane(pane.id)}
+                          onFocus={() => {
+                            lastFocusedEditorPaneRef.current = pane.id;
+                            selectPane(pane.id);
+                          }}
                         />
                       </div>
                     </>}
@@ -1232,7 +1458,8 @@ export default function App() {
           codeFontOverride={codeFontOverride}
           onCodeFontChange={setCodeFontOverride}
           onThemeChange={setThemeId}
-          onClose={() => setIsPaletteOpen(false)}
+          onClose={closePalette}
+          onRunCommand={command => command.run()}
         />
       )}
 
@@ -1254,7 +1481,7 @@ export default function App() {
           onFontSizeChange={setFontSize}
           wordWrap={wordWrap}
           onWordWrapChange={setWordWrap}
-          onClose={() => setIsSettingsOpen(false)}
+          onClose={closeSettings}
         />
       )}
 
