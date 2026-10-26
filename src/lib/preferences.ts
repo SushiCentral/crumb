@@ -1,3 +1,5 @@
+export const defaultSidebarWidth = 260;
+
 export function readNumber(raw: string | null, fallback: number, min: number, max: number): number {
   const value = raw == null || raw.trim() === '' ? NaN : Number(raw);
   return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;

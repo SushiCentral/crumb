@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { shortcutLabel } from './lib/platform';
 import { scaleShortcut, nextZoom } from './lib/scale-shortcuts';
-import { readNumber, readBoolean, clampPanelHeight, clampSidebarWidth, readEditorPreferences, lineEnding } from './lib/preferences';
+import { defaultSidebarWidth, readNumber, readBoolean, clampPanelHeight, clampSidebarWidth, readEditorPreferences, lineEnding } from './lib/preferences';
 import type { CursorInfo } from './lib/editor-extensions';
 import StatusBar from './components/StatusBar';
 import { parseRecentProjects, recordProject, type RecentProject } from './lib/recent-projects';
@@ -70,7 +70,7 @@ export default function App() {
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<'explorer' | 'search'>(() => readPreference('crumb.sidebarTab', 'explorer') === 'search' ? 'search' : 'explorer');
-  const [sidebarWidth, setSidebarWidth] = useState(() => clampSidebarWidth(readNumber(readPreference('crumb.sidebarWidth', ''), 280, 160, 10000), window.innerWidth));
+  const [sidebarWidth, setSidebarWidth] = useState(() => clampSidebarWidth(readNumber(readPreference('crumb.sidebarWidth', ''), defaultSidebarWidth, 160, 10000), window.innerWidth));
   const [panelHeight, setPanelHeight] = useState(() => clampPanelHeight(readNumber(readPreference('crumb.panelHeight', ''), Math.round(window.innerHeight * 0.4), 0, 10000), window.innerHeight));
   const [zoomLevel, setZoomLevel] = useState(() => readNumber(readPreference('crumb.zoom', ''), 1, 0.5, 2));
   const [explorerRootPath, setExplorerRootPath] = useState<string | null>(null);
@@ -123,6 +123,7 @@ export default function App() {
 
   const splitDragRef = useRef<{ leftId: string; rightId: string; startX: number; leftWidth: number; rightWidth: number } | null>(null);
   const quickOpenRef = useRef<QuickOpenHandle>(null);
+  const tabMenuRef = useRef<HTMLDivElement>(null);
   const sidebarDraggingRef = useRef(false);
   const panelDraggingRef = useRef(false);
 
@@ -145,6 +146,13 @@ export default function App() {
       workspaceRef.current?.querySelector<HTMLElement>(`[data-pane-id="${activePaneId}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
   }, [activePaneId, panes.length]);
+
+  useEffect(() => {
+    if (!tabMenu) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    tabMenuRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    return () => { if (previousFocus?.isConnected) previousFocus.focus(); };
+  }, [tabMenu]);
 
   const addToast = (message: string, type: ToastMessage['type'] = 'info') => {
     const id = crypto.randomUUID();
@@ -200,7 +208,7 @@ export default function App() {
   }, []);
 
   const resetLayout = () => {
-    setSidebarWidth(clampSidebarWidth(280, window.innerWidth));
+    setSidebarWidth(clampSidebarWidth(defaultSidebarWidth, window.innerWidth));
     setPanelHeight(clampPanelHeight(Math.round(window.innerHeight * 0.4), window.innerHeight));
     setSidebarTab('explorer');
     setIsSidebarOpen(true);
@@ -724,21 +732,22 @@ export default function App() {
 
   const commands: PaletteCommand[] = [
     { id: 'settings', label: 'Preferences: Open Settings', shortcut: shortcutLabel(','), run: () => setIsSettingsOpen(true) },
-    { id: 'theme', label: 'Preferences: Color Theme', detail: `Current: ${theme.name}`, run: () => {} },
-    { id: 'code-font', label: 'Preferences: Editor Font', detail: `Current: ${codeFont}`, run: () => {} },
+    { id: 'theme', label: 'Preferences: Color Theme', detail: theme.name, run: () => {} },
+    { id: 'code-font', label: 'Preferences: Editor Font', detail: `${codeFont} · ${fontSize}px`, run: () => {} },
     { id: 'search-files', label: 'View: Find in Files (Search)', shortcut: shortcutLabel('Shift+F'), run: () => { setIsSidebarOpen(true); setSidebarTab('search'); } },
     { id: 'terminal', label: isPanelOpen ? 'View: Hide Terminal' : 'View: Show Terminal', shortcut: shortcutLabel('J'), run: () => setIsPanelOpen(value => !value) },
     { id: 'explorer', label: isSidebarOpen ? 'View: Hide File Tree' : 'View: Show File Tree', shortcut: shortcutLabel('B'), run: () => setIsSidebarOpen(value => !value) },
-    { id: 'word-wrap', label: wordWrap ? 'Editor: Disable Word Wrap' : 'Editor: Enable Word Wrap', detail: wordWrap ? 'Wrapping is on' : 'Wrapping is off', run: () => setWordWrap(value => !value) },
+    { id: 'word-wrap', label: wordWrap ? 'Editor: Disable Word Wrap' : 'Editor: Enable Word Wrap', run: () => setWordWrap(value => !value) },
     ...(activeTab ? [{ id: 'split-editor', label: 'Editor: Open Active File in Split View', run: () => openInSplit(activeTab.id) }] : []),
     ...(canPreviewMarkdown ? [{ id: 'markdown-preview', label: isPreviewOpen ? 'Markdown: Hide Preview' : 'Markdown: Open Preview to Side', run: toggleMarkdownPreview }] : []),
-    { id: 'font-up', label: 'Appearance: Increase Font Size', detail: `Currently ${fontSize}px`, run: () => setFontSize(value => Math.min(24, value + 1)) },
-    { id: 'font-down', label: 'Appearance: Decrease Font Size', detail: `Currently ${fontSize}px`, run: () => setFontSize(value => Math.max(10, value - 1)) },
-    { id: 'font-reset', label: 'Appearance: Reset Font Size', detail: '13px', run: () => setFontSize(13) },
+    { id: 'font-up', label: 'Appearance: Increase Font Size', shortcut: shortcutLabel('Shift+='), run: () => setFontSize(value => Math.min(24, value + 1)) },
+    { id: 'font-down', label: 'Appearance: Decrease Font Size', shortcut: shortcutLabel('Shift+−'), run: () => setFontSize(value => Math.max(10, value - 1)) },
+    { id: 'font-reset', label: 'Appearance: Reset Font Size', shortcut: shortcutLabel('Shift+0'), run: () => setFontSize(13) },
     { id: 'open', label: 'File: Open File', shortcut: shortcutLabel('O'), run: () => void handleOpenFile() },
     { id: 'open-folder', label: 'File: Open Folder / Project', run: () => void handleChooseFolder() },
     { id: 'quick-open', label: 'File: Search Files', shortcut: shortcutLabel('P'), run: () => quickOpenRef.current?.focus() },
     { id: 'new', label: 'File: New File', shortcut: shortcutLabel('N'), run: addUntitledTab },
+    ...(tabs.length > 0 ? [{ id: 'close-all', label: 'File: Close All Tabs', run: closeAllTabsAndPanes }] : []),
     ...(activeTab ? [{ id: 'save', label: 'File: Save File', shortcut: shortcutLabel('S'), run: () => void handleSaveFile() }] : []),
     { id: 'terminal-folder', label: 'File: Open Current Terminal Folder', run: () => void handleOpenTerminalFolder() },
   ];
@@ -746,13 +755,10 @@ export default function App() {
   return (
     <div className="app-shell" style={{ ...themeVariables(theme, codeFont), colorScheme: theme.dark ? 'dark' : 'light', height: "100vh", width: "100vw", display: "flex", flexDirection: "column", overflow: "hidden", backgroundColor: "var(--editor)", color: "var(--text)" }}>
       <header className="top-bar">
-        <div className="top-bar-brand"><strong>crumb</strong></div>
+        <div className="top-bar-brand"><strong>crumb</strong><span className="top-bar-workspace" title={explorerRootPath ?? 'No folder open'}>{explorerRootPath ? getFileNameFromPath(explorerRootPath) : 'No folder'}</span></div>
         <QuickOpen ref={quickOpenRef} rootPath={explorerRootPath} openPaths={tabs.flatMap(tab => tab.path ? [tab.path] : [])} onOpenFile={path => { void handleOpenFile(path); }} />
         <div className="top-bar-actions">
-          <span className="top-bar-workspace" title={explorerRootPath ?? 'No folder open'}>{explorerRootPath ? getFileNameFromPath(explorerRootPath) : 'No folder'}</span>
-          <span className="top-bar-language" title="Current file language">{activeTab ? languageName(activeTab.path) : ''}</span>
           {canPreviewMarkdown && <button className={`markdown-preview-toggle ${isPreviewOpen ? 'active' : ''}`} aria-pressed={isPreviewOpen} title={isPreviewOpen ? 'Hide Markdown preview' : 'Open Markdown preview to the side'} onClick={toggleMarkdownPreview}><SplitPreviewIcon /><span>Preview</span></button>}
-          {tabs.length > 0 && <button title="Close all editor tabs" onClick={closeAllTabsAndPanes}>Close All</button>}
           <button title={`Commands and themes (${shortcutLabel('Shift+P')})`} onClick={() => setIsPaletteOpen(true)}>Commands</button>
         </div>
       </header>
@@ -862,11 +868,18 @@ export default function App() {
             aria-label="Resize file tree"
             aria-orientation="vertical"
             aria-valuemin={160}
-            aria-valuemax={Math.max(160, window.innerWidth - 268)}
+            aria-valuemax={Math.max(160, window.innerWidth - 280)}
             aria-valuenow={sidebarWidth}
+            title="Drag to resize Explorer; double-click or press Home to reset"
+            onDoubleClick={() => {
+              const width = clampSidebarWidth(defaultSidebarWidth, window.innerWidth);
+              currentDragWidthRef.current = width;
+              setSidebarWidth(width);
+            }}
             tabIndex={0}
             onPointerDown={event => {
               event.preventDefault();
+              currentDragWidthRef.current = sidebarWidth;
               sidebarDraggingRef.current = true;
               event.currentTarget.setPointerCapture(event.pointerId);
             }}
@@ -904,7 +917,10 @@ export default function App() {
             onKeyDown={event => {
               if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
                 event.preventDefault();
-                setSidebarWidth(width => Math.max(160, Math.min(window.innerWidth - 268, width + (event.key === 'ArrowRight' ? 10 : -10))));
+                setSidebarWidth(width => clampSidebarWidth(width + (event.key === 'ArrowRight' ? 10 : -10), window.innerWidth));
+              } else if (event.key === 'Home') {
+                event.preventDefault();
+                setSidebarWidth(clampSidebarWidth(defaultSidebarWidth, window.innerWidth));
               }
             }}
           />
@@ -991,7 +1007,13 @@ export default function App() {
                             </div>;
                           })}
                         </div>
-                        {panes.length > 1 && canClose && <button className="editor-pane-close" aria-label={`Close split for ${getFileNameFromPath(file.path)}`} title="Close split" onClick={() => closePane(pane.id)}>×</button>}
+                        <div className="editor-pane-actions">
+                          <button className="editor-tab-menu" aria-label="Tab actions" title="Tab actions" aria-expanded={tabMenu?.paneId === pane.id} aria-controls={tabMenu?.paneId === pane.id ? 'editor-tab-actions' : undefined} onClick={event => {
+                            const rect = event.currentTarget.getBoundingClientRect();
+                            setTabMenu({ x: Math.max(8, rect.right - 190), y: rect.bottom + 4, tabId: file.id, paneId: pane.id });
+                          }}>⋯</button>
+                          {panes.length > 1 && canClose && <button className="editor-pane-close" aria-label={`Close split for ${getFileNameFromPath(file.path)}`} title="Close split" onClick={() => closePane(pane.id)}>×</button>}
+                        </div>
                       </div>
                       <div className="editor-pane-content">
                         <Editor
@@ -1125,11 +1147,14 @@ export default function App() {
 
       {/* Tab Context Menu */}
       {tabMenu && <div className="tab-menu-backdrop" onMouseDown={() => setTabMenu(null)} onContextMenu={event => { event.preventDefault(); setTabMenu(null); }}>
-        <div className="tree-menu" style={{ left: tabMenu.x, top: tabMenu.y }} onMouseDown={event => event.stopPropagation()}>
+        <div ref={tabMenuRef} id="editor-tab-actions" className="tree-menu" style={{ left: tabMenu.x, top: tabMenu.y }} onMouseDown={event => event.stopPropagation()} onKeyDown={event => {
+          if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setTabMenu(null); }
+        }}>
           <button onClick={() => { requestCloseTab(tabMenu.tabId, tabMenu.paneId); setTabMenu(null); }}>Close Tab</button>
           <button onClick={() => { closeOtherTabs(tabMenu.tabId, tabMenu.paneId); setTabMenu(null); }}>Close Others</button>
           <button onClick={() => { closeTabsToTheRight(tabMenu.tabId, tabMenu.paneId); setTabMenu(null); }}>Close to the Right</button>
           <button onClick={() => { closeSavedTabs(tabMenu.paneId); setTabMenu(null); }}>Close Saved</button>
+          <button onClick={() => { setTabMenu(null); closeAllTabsAndPanes(); }}>Close All Tabs</button>
           <div style={{ height: '1px', background: 'var(--border)', margin: '4px 0' }} />
           <button onClick={() => { selectPane(tabMenu.paneId); openInSplit(tabMenu.tabId); setTabMenu(null); }}>Open in Split View</button>
         </div>
