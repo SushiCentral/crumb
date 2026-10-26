@@ -61,7 +61,18 @@ Settings toggle + typed VimConfig
      Crumb status bar + save flow
 ```
 
-CodeMirror remains the owner of document content, selections, and undo history. Vim owns command interpretation and the Vim-specific session state required for repeat, registers, search, and marks. App remains the owner of tabs and disk persistence.
+CodeMirror remains the owner of document content, selections, and undo history. Vim owns command interpretation. A single App-owned `VimSession` coordinates session-wide repeat, global registers/search, document-owned marks, active command ownership, and authoritative document closure across pane adapters. App remains the owner of tabs and disk persistence.
+
+## Application-owned Vim session
+
+Separate engine-adapter lifetime from Vim-session/document lifetime. `App` creates one stable coordinator and passes it, plus a stable pane ID, to each `Editor` instance. The coordinator owns one authoritative command adapter at a time across the entire application session (the engine's insert-repeat payload is global), document-keyed mark snapshots, and the committed set of open document IDs. Each `Editor` still owns its own `EditorView`, selections, cached `EditorState`s, and CodeMirror history.
+
+- Only the active owner publishes session repeat and document marks. An inactive pane must never overwrite newer state with stale or empty adapter state.
+- On ownership transfer, finalize the outgoing adapter while it is alive, then restore the incoming adapter only after its target document, current content, and Vim enablement are installed. If React updates are pending, queue the owner request until the binding reports ready. Global disable finalizes the owner once; stale/detached bindings are harmless no-ops.
+- Ownership transfers between editor panes (including same-document splits) converge document marks before the incoming pane accepts Vim commands. Continuous broadcasting of live bookmark objects is not required; command-visible state must converge at the boundary.
+- Document closure is authoritative and separate from pane mount/unmount. Reconcile from App's committed tab/document IDs; replacing panes, StrictMode effect replay, or temporarily removing all panes must not imply a document closed if its ID remains open. A late adapter capture may not resurrect marks for a closed document. Closing a document discards its marks but does not reset session-wide repeat.
+- When the active owner unmounts, finalize it before destroying its view, then detach it. Do not release document state from an individual pane's cleanup.
+- Keep package-specific adapter access within `src/lib/vim/`. This coordinator must not clone adapters, merge CodeMirror history, or redesign document synchronization. If safe ownership transfer needs those changes, stop and ask.
 
 ## Configuration and activation
 
@@ -75,9 +86,9 @@ CodeMirror remains the owner of document content, selections, and undo history. 
 
 - When Vim mode is enabled and an editor is focused, Vim receives its supported Ctrl keybindings before conflicting Crumb shortcuts. App commands remain available through the command palette and non-conflicting platform shortcuts. On macOS, Command shortcuts remain app shortcuts unless explicitly mapped. Shortcut precedence customization is deferred to the later settings stage.
 - `Ctrl-W` is reserved for Vim in Vim-controlled editor contexts and must never close a Crumb tab. Unsupported continuations cancel cleanly. Vim does not gain window-management commands in v1. Dialogs, palettes, terminal input, and ordinary text inputs retain their own input.
-- Tab activation enters Normal mode and cancels pending operators, counts/register prefixes, incomplete mappings, active Visual context, and unfinished search input. No partial command may execute in another tab.
+- Tab activation or pane ownership transfer enters Normal mode in the newly active adapter and cancels pending operators, counts/register prefixes, incomplete mappings, active Visual context, and unfinished search input. No partial command may execute in another tab or pane.
 - Preserve document, cursor, and existing per-pane CodeMirror undo history. Two panes showing the same tab must show synchronized content and independent, correctly mapped cursors/selections. Do not promise a unified Neovim-style undo tree across split panes. If safe same-document split undo needs a document/history redesign, stop and ask before changing that architecture.
-- Preserve the last change for `.`, committed search, and registers for the Crumb application session. Preserve lowercase marks by document identity (same-tab splits share marks). Transient mode, pending operator/count/register/mapping input, Visual state, and unfinished search input are cancelled on tab activation, pane-focus transfer, or Vim disable; the newly active editor enters Normal mode. Closing a document releases its local marks. Vim session state is not persisted across app restarts.
+- Preserve the last change for `.`, committed search, and registers for the Crumb application session. Preserve lowercase marks by document identity; same-tab split panes converge marks at command-ownership transfer. Transient mode, pending operator/count/register/mapping input, Visual state, and unfinished search input are cancelled on tab activation, pane-focus transfer, or Vim disable; the newly active editor enters Normal mode. Closing a document releases its local marks. Vim session state is not persisted across app restarts.
 - Disabling preserves document, cursor, history, and committed Vim session state, while removing transient input ownership/listeners/panels. Re-enabling enters Normal mode. Ordinary CodeMirror edits while Vim mode is disabled must not restore stale mark positions.
 - Toggle transitions must avoid duplicate plugins, mappings, stale view references, or broken undo history.
 - Crumb save remains authoritative for filesystem writes. Wire Vim's supported write action to the active tab's save path; errors and untitled files use Crumb's existing save behavior.

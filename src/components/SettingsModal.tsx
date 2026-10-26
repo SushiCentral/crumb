@@ -25,12 +25,12 @@ interface SettingsModalProps {
 const tabs = ['Appearance', 'Editor', 'Terminal', 'Workspace'] as const;
 type SettingsTab = typeof tabs[number];
 
-function Toggle({ id, label, description, checked, onChange }: {
-  id: string; label: string; description?: string; checked: boolean; onChange: (value: boolean) => void;
+function Toggle({ id, label, description, descriptionId, checked, onChange }: {
+  id: string; label: string; description?: string; descriptionId?: string; checked: boolean; onChange: (value: boolean) => void;
 }) {
   return <div className="settings-row">
-    <div className="settings-row-label"><label htmlFor={id}>{label}</label>{description && <small>{description}</small>}</div>
-    <button id={id} className={`toggle-switch ${checked ? 'checked' : ''}`} role="switch" aria-checked={checked} onClick={() => onChange(!checked)}><span className="toggle-slider" /></button>
+    <div className="settings-row-label"><label htmlFor={id}>{label}</label>{description && <small id={descriptionId}>{description}</small>}</div>
+    <button id={id} className={`toggle-switch ${checked ? 'checked' : ''}`} role="switch" aria-checked={checked} aria-describedby={descriptionId} onClick={() => onChange(!checked)}><span className="toggle-slider" /></button>
   </div>;
 }
 
@@ -122,6 +122,7 @@ export default function SettingsModal({ themes, currentThemeId, onThemeChange, o
             ['autoCloseBrackets', 'Auto-close brackets', 'Insert closing brackets and quotes as you type'],
             ['highlightActiveLine', 'Highlight active line', 'Highlight the current line and its line number'],
           ] as const).map(([key, label, description]) => <Toggle key={key} id={`editor-${key}`} label={label} description={description} checked={editorPreferences[key]} onChange={checked => onEditorPreferencesChange({ ...editorPreferences, [key]: checked })} />)}
+          <Toggle id="editor-vim-mode" label="Vim mode" description="Use Vim-style modes and commands in the code editor." descriptionId="editor-vim-mode-description" checked={editorPreferences.vimModeEnabled} onChange={checked => onEditorPreferencesChange({ ...editorPreferences, vimModeEnabled: checked })} />
           <Toggle id="word-wrap-toggle" label="Word wrap" description="Wrap long lines to the editor width" checked={wordWrap} onChange={onWordWrapChange} />
           <div className="settings-row"><label htmlFor="indent-size">Indent size</label><select id="indent-size" className="settings-select" value={editorPreferences.indentSize} onChange={event => onEditorPreferencesChange({ ...editorPreferences, indentSize: Number(event.target.value) as 2 | 3 | 4 })}>{[2, 3, 4].map(size => <option key={size} value={size}>{size}</option>)}</select></div>
           <div className="settings-row"><label htmlFor="indent-with">Indent with</label><select id="indent-with" className="settings-select" value={editorPreferences.indentWith} onChange={event => onEditorPreferencesChange({ ...editorPreferences, indentWith: event.target.value as 'spaces' | 'tabs' })}><option value="spaces">Spaces</option><option value="tabs">Tabs</option></select></div>

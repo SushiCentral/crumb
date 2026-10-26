@@ -4,7 +4,7 @@
 
 **Goal:** Add a toggleable, well-documented native Vim editing mode to Crumb's existing CodeMirror editor, with Neovim-default behavior for the agreed first-milestone command set.
 
-**Architecture:** Use `@replit/codemirror-vim@6.4.0` behind a small `src/lib/vim/` module with typed source-level configuration. CodeMirror remains the document, selection, and undo owner; App remains the tab and file-save owner. Keep the Vim extension in its own compartment, coordinate window-capture shortcuts through one policy, and add only a bounded lifecycle adapter if tests prove it is necessary. Stop for user approval before a broad engine fork or document/history redesign.
+**Architecture:** Use `@replit/codemirror-vim@6.4.0` behind a small `src/lib/vim/` module with typed source-level configuration. CodeMirror remains the document, selection, and undo owner; App owns tabs, file saves, and one Vim session coordinator for pane command ownership, session repeat, document marks, and authoritative document closure. Keep each editor's Vim extension in its own compartment. The user approved an app-level state-coordination expansion to solve shared-pane lifecycle defects; an engine fork or CodeMirror document/history redesign remains out of scope.
 
 **Tech Stack:** React 19, TypeScript, CodeMirror 6, `@replit/codemirror-vim@6.4.0`, Node's built-in test runner, Playwright for focused browser integration tests, Tauri WebView manual smoke tests.
 
@@ -17,13 +17,14 @@
 | `src/lib/vim/config.ts` | Typed source-level Vim mappings/options and validated defaults; no engine imports exposed to callers. |
 | `src/lib/vim/extension.ts` | Compose the package extension, install configuration idempotently, and expose the Crumb-facing mode/status/lifecycle contract. |
 | `src/lib/vim/lifecycle.ts` | Narrow tab/pane/toggle lifecycle adapter for preserving approved persistent Vim state and cancelling transient input. |
+| `src/lib/vim/session.ts` | App-owned `VimSession` coordinator for active pane ownership, repeat/mark snapshots, and authoritative open-document reconciliation. |
 | `src/lib/vim/shortcuts.ts` | Pure key/focus ownership decision used before App consumes capture-phase shortcuts. |
 | `src/lib/preferences.ts` | Add persisted `vimModeEnabled` preference, default `false`. |
 | `src/lib/editor-extensions.ts` | Continue defining ordinary CodeMirror extensions; make ordinary `indentWithTab` unavailable in Vim Normal/Visual contexts. |
 | `src/components/Editor.tsx` | Install Vim with a dedicated `Compartment`, notify Crumb of mode/pending-state changes, and coordinate tab-state lifecycle without replacing `EditorState`. |
 | `src/components/SettingsModal.tsx` | Add the enable/disable toggle to the existing Editor section only. |
 | `src/components/StatusBar.tsx` | Render the small mode/pending-input status supplied by the Vim module. |
-| `src/App.tsx` | Pass the toggle/config to editor panes, route status and save callbacks, and consult Vim shortcut ownership before consuming conflicting keys. |
+| `src/App.tsx` | Own one stable Vim session, reconcile authoritative open document IDs, request active command ownership, pass session/pane identity to editors, and consult shortcut ownership later. |
 | `tests/vim-config.test.ts` | Config and persisted-toggle validation using `node:test`. |
 | `tests/vim-shortcuts.test.ts` | Pure shortcut-ownership policy tests. |
 | `tests/vim-engine.test.ts` | Browser-independent configuration and package-contract tests where the released API permits. |
@@ -177,35 +178,38 @@ Inspect the exact 6.4.0 adapter/core source and prove the smallest version-locke
 
 Run the focused browser suite. Expected: transient input is cancelled on tab/pane/disable transitions; `.`, committed search, registers, and marks survive as designed; view teardown leaves no stale adapter; CodeMirror history remains intact.
 
-### Task 4: Integrate Vim enablement into Editor settings and CodeMirror compartments
+### Task 4: Integrate Vim settings and establish App-owned shared state
 
 **Files:**
-- Modify: `src/components/Editor.tsx`, `src/lib/editor-extensions.ts`, `src/components/SettingsModal.tsx`, `src/App.tsx`
-- Modify: `tests/editor-extensions.test.ts`, `tests/preferences.test.ts`
+- Create: `src/lib/vim/session.ts`, `tests/vim-session.test.ts`, `tests/e2e/editor-shared-fixture.html`, `tests/e2e/editor-shared-fixture.tsx`, `tests/e2e/editor-shared.spec.ts`
+- Modify: `src/components/Editor.tsx`, `src/components/SettingsModal.tsx`, `src/App.tsx`, `src/lib/vim/lifecycle.ts`
+- Modify: `tests/editor-extensions.test.ts`, `tests/e2e/editor-component-fixture.tsx`, `tests/e2e/editor-component.spec.ts`
 
 - [ ] **Step 1: Add failing tests for compartment and preference preservation**
 
-Extend the editor extension test to create a document, make one edit, reconfigure the Vim compartment off/on, and assert the document and `undoDepth` remain unchanged. Assert that Editor preference changes do not recreate the Vim extension or lose history.
+Extend the compartment test to create a document, make an edit, reconfigure Vim off/on, and assert document, selection, and `undoDepth` remain unchanged. Add failing session-coordinator and real-Editor tests before implementation for: A edit → untouched B → global toggle → `.` still repeats A's latest edit; one pane changes a document mark, ownership transfers, and the receiving same-document pane jumps to the latest mark; owner unmount with a surviving pane; simultaneous final-pane removal; same-commit pane replacement with the same open document IDs; StrictMode effect replay; and late owner capture after a document has closed.
 
 - [ ] **Step 2: Run focused tests and confirm failure**
 
-Run `node --test tests/editor-extensions.test.ts tests/preferences.test.ts`.
+Run `node --test tests/editor-extensions.test.ts tests/preferences.test.ts tests/vim-session.test.ts` and the focused failing browser cases.
 
-Expected: the new toggle/lifecycle assertions fail before the Vim compartment is connected.
+Expected: compartment assertions fail before integration; shared-state cases reproduce the ownership, stale-mark, unmount, and document-close failures before the coordinator exists.
 
 - [ ] **Step 3: Wire one independent Vim compartment per editor state**
 
-Add a dedicated Vim `Compartment` token in `Editor.tsx`; compose it with the Vim module when enabled and `[]` when disabled. Preserve the existing invariant `editorCoreExtensions` history and preference compartment. Ensure each cached tab state has the current setting when reactivated.
+Add a `VimSession` created once by App and passed with stable pane IDs to each Editor. The session has one application-wide command owner, document-owned marks, session-owned repeat, and an authoritative set of open tab IDs reconciled from committed App state. Each Editor creates its own Vim extension/installer instance and dedicated Vim `Compartment`; preserve the current ref-counted mapping ownership across split panes.
+
+On tab/view changes, Vim disable, ownership transfer, and Editor unmount, finalize the current owner while its adapter still exists, cancel transient input, publish only owner state, then detach. Restore the next owner only after its target document/content/enabled state is installed. Inactive peers never overwrite snapshots. Ownership transfer between same-document panes converges marks before accepting commands. Document close reconciliation comes only from App's committed tab IDs, not pane effects or transient unmounts; late captures cannot revive closed marks. Do not change CodeMirror history or clone adapters.
 
 - [ ] **Step 4: Add the Settings toggle using existing toggle semantics**
 
-Expose `vimModeEnabled` through the existing `EditorPreferences` props and generic `crumb.${key}` persistence effect. Add one switch to **Settings → Editor** with clear copy; no dedicated Vim panel and no other layout redesign. Delegate the visual implementation to `@designer`; validate accessibility and consistency against the existing `Toggle` component.
+Expose `vimModeEnabled` through existing `EditorPreferences` and its generic `crumb.${key}` persistence. Add one switch to **Settings → Editor**; no dedicated Vim panel or layout redesign. Reuse `Toggle`, associate the description accessibly, and keep the copy accurate to implemented shortcut precedence. The visual change belongs to `@designer`.
 
 - [ ] **Step 5: Verify settings and extension tests**
 
-Run `node --test tests/editor-extensions.test.ts tests/preferences.test.ts` and `npm run test:e2e -- --project=chromium`.
+Run `node --test tests/editor-extensions.test.ts tests/preferences.test.ts tests/vim-session.test.ts` and `npm run test:e2e -- --project=chromium tests/e2e/editor-component.spec.ts tests/e2e/editor-shared.spec.ts tests/e2e/vim-lifecycle.spec.ts`.
 
-Expected: default is off, the setting persists, enabling/disabling preserves CodeMirror document/cursor/history, and repeated toggles do not duplicate the extension.
+Expected: default is off; toggles preserve document/cursor/history; pane mappings remain owned; repeat always represents the latest actual session edit; document marks converge at every ownership boundary; true close releases them exactly once; StrictMode/replacement effects do not release or resurrect state.
 
 ### Task 5: Route keys and status through Crumb-owned seams
 

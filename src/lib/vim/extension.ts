@@ -5,13 +5,14 @@ import type { EditorView } from '@codemirror/view';
 import { defaultVimConfig, type VimConfig } from './config.ts';
 import { createMappingInstaller } from './mappings.ts';
 import {
-  afterDocumentActivation,
-  beforeDocumentActivation,
   cancelTransientInput,
+  captureVimAdapter,
   getVimPublicState,
   patchVimAdapter,
-  releaseDocumentMarks,
+  restoreVimAdapter,
+  type VimDocumentMarks,
   type VimPublicState,
+  type VimRepeatSnapshot,
 } from './lifecycle.ts';
 
 export type { VimPublicMode, VimPublicState, VimPublicMode as VimMode } from './lifecycle.ts';
@@ -57,14 +58,30 @@ export function createVimExtension(config: VimConfig = defaultVimConfig): VimExt
     unmap: (lhs, context) => Vim.unmap(lhs, context),
   });
 
+  // Compatibility store for the isolated single-adapter API used by the
+  // lifecycle fixture and module tests. Crumb application code uses the
+  // App-owned VimSession instead; both share the same low-level adapter
+  // capture/restore primitives and never merge state by capture order.
+  let repeat: VimRepeatSnapshot = { inputState: undefined, actionCommand: undefined };
+  const marks = new Map<string, VimDocumentMarks>();
+
   return {
     extension: [vim({ status: false }), adapterLifecyclePlugin],
     installMappings: mappings.installMappings,
     removeMappings: mappings.removeMappings,
     getState: getVimPublicState,
     cancelInput: cancelTransientInput,
-    beforeActivation: beforeDocumentActivation,
-    afterActivation: afterDocumentActivation,
-    releaseDocument: releaseDocumentMarks,
+    beforeActivation: (view, documentId) => {
+      const captured = captureVimAdapter(view);
+      if (!captured) return;
+      repeat = captured.repeat;
+      if (captured.marks.length === 0) marks.delete(documentId);
+      else marks.set(documentId, { doc: captured.document, marks: captured.marks });
+    },
+    afterActivation: (view, documentId) => {
+      const result = restoreVimAdapter(view, repeat, marks.get(documentId));
+      if (result === 'stale') marks.delete(documentId);
+    },
+    releaseDocument: documentId => marks.delete(documentId),
   };
 }

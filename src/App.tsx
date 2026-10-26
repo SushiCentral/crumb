@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { scaleShortcut, nextZoom } from './lib/scale-shortcuts';
 import { readNumber, readBoolean, clampPanelHeight, clampSidebarWidth, readEditorPreferences, lineEnding } from './lib/preferences';
+import { createVimSession } from './lib/vim/session';
 import type { CursorInfo } from './lib/editor-extensions';
 import StatusBar from './components/StatusBar';
 import { parseRecentProjects, recordProject, type RecentProject } from './lib/recent-projects';
@@ -90,6 +91,7 @@ export default function App() {
   });
   const [wordWrap, setWordWrap] = useState(() => readPreference('crumb.wordWrap', 'true') !== 'false');
   const [editorPreferences, setEditorPreferences] = useState(() => readEditorPreferences(key => readPreference(key, '')));
+  const [vimSession] = useState(() => createVimSession());
   const [clearPromptOnStart, setClearPromptOnStart] = useState(() => readBoolean(readPreference('crumb.terminalClearPrompt', ''), false));
   const [paneCursors, setPaneCursors] = useState<Record<string, CursorInfo>>({});
 
@@ -161,6 +163,15 @@ export default function App() {
       for (const [key, value] of Object.entries(editorPreferences)) localStorage.setItem(`crumb.${key}`, String(value));
     } catch { /* Storage may be unavailable. */ }
   }, [editorPreferences]);
+
+  useEffect(() => {
+    vimSession.reconcileDocuments(tabs.map(tab => tab.id));
+  }, [vimSession, tabs]);
+
+  useEffect(() => {
+    const activePane = panes.find(pane => pane.id === activePaneId);
+    vimSession.requestOwner(activePane?.kind === 'editor' ? activePane.id : null);
+  }, [vimSession, activePaneId, panes]);
 
   useEffect(() => {
     try { localStorage.setItem('crumb.terminalClearPrompt', String(clearPromptOnStart)); } catch {}
@@ -1003,6 +1014,8 @@ export default function App() {
                       <div className="editor-pane-content">
                         <Editor
                           ref={handle => { if (handle) editorRefs.current.set(pane.id, handle); else editorRefs.current.delete(pane.id); }}
+                          paneId={pane.id}
+                          vimSession={vimSession}
                           tabId={file.id}
                           path={file.path}
                           openTabIds={tabs.map(tab => tab.id)}

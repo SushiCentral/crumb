@@ -48,31 +48,29 @@ interface QuerySignature {
   flags: string;
 }
 
-interface RepeatSnapshot {
+export interface VimRepeatSnapshot {
   inputState: vimState['lastEditInputState'];
   actionCommand: vimState['lastEditActionCommand'];
 }
 
-interface MarkPosition {
+export interface VimMarkPosition {
   name: string;
   line: number;
   ch: number;
 }
 
-interface MarkSnapshot {
+export interface VimDocumentMarks {
   doc: Text;
-  marks: MarkPosition[];
+  marks: readonly VimMarkPosition[];
 }
 
-// Vim's last change is session-wide, not buffer-local. Keeping the engine's
-// class instances by reference avoids serializing InputState/command objects
-// and keeps the global insert-change register (`macroModeState`) coherent.
-let repeatSnapshot: RepeatSnapshot = { inputState: undefined, actionCommand: undefined };
+export interface VimAdapterCapture {
+  document: Text;
+  repeat: VimRepeatSnapshot;
+  marks: readonly VimMarkPosition[];
+}
 
-// Marks are doc-owned positions, keyed by the caller's stable document id.
-// They are captured before the old adapter is destroyed and re-created as new
-// Marker instances in the replacement adapter.
-const markSnapshots = new Map<string, MarkSnapshot>();
+export type VimRestoreResult = 'applied' | 'stale' | 'unavailable';
 
 // Search query and direction live in the engine singleton. `/` and `?` mutate
 // the direction as soon as the prompt opens, and the incremental query update
@@ -380,23 +378,18 @@ export function cancelTransientInput(view: EditorView): void {
   }
 }
 
-function captureRepeatState(vim: vimState): void {
-  // These are engine class instances. Holding references is intentional; the
-  // global macro/insert-change state remains the single source for insert
-  // repeat, so each adapter uses the same latest session change.
-  repeatSnapshot = {
-    inputState: vim.lastEditInputState,
-    actionCommand: vim.lastEditActionCommand,
-  };
-}
+/**
+ * Finalize an adapter for an ownership/document transition while it is still
+ * alive. The returned repeat references are engine class instances; callers
+ * must keep them opaque and never serialize them.
+ */
+export function captureVimAdapter(view: EditorView): VimAdapterCapture | null {
+  cancelTransientInput(view);
 
-function restoreRepeatState(vim: vimState): void {
-  vim.lastEditInputState = repeatSnapshot.inputState;
-  vim.lastEditActionCommand = repeatSnapshot.actionCommand;
-}
+  const vim = adapterVimState(view);
+  if (!vim) return null;
 
-function captureMarkState(vim: vimState, documentId: string, doc: Text): void {
-  const marks: MarkPosition[] = [];
+  const marks: VimMarkPosition[] = [];
   for (const [name, marker] of Object.entries(vim.marks) as [string, Marker][]) {
     const pos = marker.find();
     if (pos) marks.push({ name, line: pos.line, ch: pos.ch });
@@ -405,59 +398,55 @@ function captureMarkState(vim: vimState, documentId: string, doc: Text): void {
     marker.clear();
   }
   vim.marks = {};
-  if (marks.length === 0) {
-    // Do not retain a Text tree for a document that has no marks to restore.
-    markSnapshots.delete(documentId);
-    return;
-  }
-  markSnapshots.set(documentId, { doc, marks });
+
+  return {
+    document: view.state.doc,
+    repeat: {
+      inputState: vim.lastEditInputState,
+      actionCommand: vim.lastEditActionCommand,
+    },
+    marks,
+  };
 }
 
-export function releaseDocumentMarks(documentId: string): void {
-  markSnapshots.delete(documentId);
-}
+/**
+ * Install session-owned repeat/marks into a freshly installed adapter. Marks
+ * are document-owned: a snapshot for different text is stale and must be
+ * discarded rather than transplanted onto unrelated content.
+ */
+export function restoreVimAdapter(
+  view: EditorView,
+  repeat: VimRepeatSnapshot,
+  marks: VimDocumentMarks | undefined,
+): VimRestoreResult {
+  const cm = getCM(view);
+  const vim = adapterVimState(view);
+  if (!cm || !vim) return 'unavailable';
 
-function restoreMarkState(cm: CodeMirror, vim: vimState, documentId: string, doc: Text): void {
-  const snapshot = markSnapshots.get(documentId);
-  if (!snapshot) return;
+  vim.lastEditInputState = repeat.inputState;
+  vim.lastEditActionCommand = repeat.actionCommand;
   vim.marks = {};
 
-  // If the document changed while Vim was disabled we cannot map the old
-  // positions safely without a ChangeDesc. Invalidate instead of restoring
-  // marks that could point at the wrong text.
-  if (!snapshot.doc.eq(doc)) {
-    markSnapshots.delete(documentId);
-    return;
+  let result: VimRestoreResult = 'applied';
+  if (marks) {
+    const doc = view.state.doc;
+    if (!marks.doc.eq(doc)) {
+      result = 'stale';
+    } else {
+      for (const mark of marks.marks) {
+        if (mark.line < 0 || mark.line >= doc.lines) continue;
+        const line = doc.line(mark.line + 1);
+        const ch = Math.min(Math.max(0, mark.ch), line.length);
+        vim.marks[mark.name] = cm.setBookmark({ line: mark.line, ch });
+      }
+    }
   }
 
-  for (const mark of snapshot.marks) {
-    if (mark.line < 0 || mark.line >= doc.lines) continue;
-    const line = doc.line(mark.line + 1);
-    const ch = Math.min(Math.max(0, mark.ch), line.length);
-    vim.marks[mark.name] = cm.setBookmark({ line: mark.line, ch });
-  }
-}
-
-export function beforeDocumentActivation(view: EditorView, documentId: string): void {
-  const cm = getCM(view);
-  const vim = adapterVimState(view);
-  if (!cm || !vim) return;
-
-  cancelTransientInput(view);
-
-  const activeVim = adapterVimState(view);
-  if (!activeVim) return;
-  captureRepeatState(activeVim);
-  captureMarkState(activeVim, documentId, view.state.doc);
-}
-
-export function afterDocumentActivation(view: EditorView, documentId: string): void {
-  const cm = getCM(view);
-  const vim = adapterVimState(view);
-  if (!cm || !vim) return;
-
-  restoreRepeatState(vim);
-  restoreMarkState(cm, vim, documentId, view.state.doc);
   vim.status = '';
   patchVimAdapter(view);
+  return result;
+}
+
+export function hasActiveVimAdapter(view: EditorView): boolean {
+  return adapterVimState(view) !== null;
 }
