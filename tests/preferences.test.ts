@@ -34,3 +34,15 @@ test('editor preferences restore individual keys and reject invalid indentation'
   assert.equal(restored.indentWith, 'tabs');
   assert.equal(readEditorPreferences(() => '999').indentSize, 2);
 });
+
+test('vim mode preference is disabled by default and parses only explicit booleans', () => {
+  assert.equal(defaultEditorPreferences.vimModeEnabled, false);
+  assert.equal(readEditorPreferences(() => null).vimModeEnabled, false);
+
+  const read = (stored: Record<string, string>) => (key: string) => stored[key] ?? null;
+  assert.equal(readEditorPreferences(read({ 'crumb.vimModeEnabled': 'true' })).vimModeEnabled, true);
+  assert.equal(readEditorPreferences(read({ 'crumb.vimModeEnabled': 'false' })).vimModeEnabled, false);
+  for (const value of ['', 'garbage', '1', 'TRUE', 'yes']) {
+    assert.equal(readEditorPreferences(read({ 'crumb.vimModeEnabled': value })).vimModeEnabled, false);
+  }
+});
