@@ -1319,15 +1319,6 @@ export default function App() {
             <SettingsIcon width={19} height={19} />
           </button>
 
-          {/* Command Palette Trigger */}
-          <button
-            onClick={openPalette}
-            title={`Commands and themes (${shortcutLabel('Shift+P')})`}
-            aria-label="Open command palette"
-            className="activity-btn activity-btn-palette"
-          >
-            ›
-          </button>
         </div>
 
         {/* Sidebar Container */}

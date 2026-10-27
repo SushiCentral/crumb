@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { SearchIcon } from './Icons';
+import { createPointerMoveGuard } from '../lib/pointer-selection';
 import { codeFonts, type Theme } from '../lib/themes';
 
 export interface PaletteCommand {
@@ -53,6 +54,7 @@ export default function CommandPalette({ triggerRef, commands, themes, currentTh
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const pointerMoveGuardRef = useRef(createPointerMoveGuard());
   const restoreFocusRef = useRef(true);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const focusCapturedRef = useRef(false);
@@ -197,7 +199,7 @@ export default function CommandPalette({ triggerRef, commands, themes, currentTh
               role="option"
               tabIndex={-1}
               aria-selected={selectedIndex === index}
-              onMouseMove={() => setSelectedIndex(index)}
+              onMouseMove={event => { if (pointerMoveGuardRef.current(event)) setSelectedIndex(index); }}
               onClick={() => choose(index)}
             >
               <span className="theme-swatch" style={{ background: (option as Theme).colors.editor, borderColor: (option as Theme).colors.accent }} />
@@ -212,7 +214,7 @@ export default function CommandPalette({ triggerRef, commands, themes, currentTh
               role="option"
               tabIndex={-1}
               aria-selected={selectedIndex === index}
-              onMouseMove={() => setSelectedIndex(index)}
+              onMouseMove={event => { if (pointerMoveGuardRef.current(event)) setSelectedIndex(index); }}
               onClick={() => choose(index)}
             >
               <span className="palette-option-label font-option-label" style={{ fontFamily: option === 'Theme default' ? `var(--ui-font)` : `'${option}', monospace` }}>
@@ -229,7 +231,7 @@ export default function CommandPalette({ triggerRef, commands, themes, currentTh
               role="option"
               tabIndex={-1}
               aria-selected={selectedIndex === index}
-              onMouseMove={() => setSelectedIndex(index)}
+              onMouseMove={event => { if (pointerMoveGuardRef.current(event)) setSelectedIndex(index); }}
               onClick={() => choose(index)}
             >
               <CommandLabel command={option as PaletteCommand} />
