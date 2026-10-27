@@ -43,6 +43,7 @@ function Harness() {
     vimModeEnabled: params.get('vim') === '1',
   });
   const [vimSession] = useState(() => createVimSession());
+  const cursorReportCountRef = useRef(0);
 
   const stateRef = useRef<FixtureState>({ activeTabId, tabs, cursor, preferences, themeId, vimState });
   stateRef.current = { activeTabId, tabs, cursor, preferences, themeId, vimState };
@@ -56,6 +57,11 @@ function Harness() {
 
   const handleVimStateChange = useCallback((_paneId: string, next: VimPublicState) => {
     setVimState(next);
+  }, []);
+
+  const handleCursorChange = useCallback((next: CursorInfo) => {
+    cursorReportCountRef.current += 1;
+    setCursor(next);
   }, []);
 
   useEffect(() => {
@@ -77,6 +83,7 @@ function Harness() {
           doc: current.tabs.find(tab => tab.id === current.activeTabId)?.content ?? '',
           tabs: Object.fromEntries(current.tabs.map(tab => [tab.id, tab.content])),
           cursor: current.cursor,
+          cursorReportCount: cursorReportCountRef.current,
           themeId: current.themeId,
           vimState: current.vimState,
           undoDepth: (() => {
@@ -97,6 +104,13 @@ function Harness() {
       },
       setTheme: (id: string) => setThemeId(id),
       switchTab: (id: string) => setActiveTabId(id),
+      dispatchSelections: (positions: number[]) => {
+        const currentView = view();
+        if (!currentView) return;
+        for (const position of positions) {
+          currentView.dispatch({ selection: { anchor: position } });
+        }
+      },
     };
   }, []);
 
@@ -120,7 +134,7 @@ function Harness() {
         fontFamily={theme.codeFont}
         wordWrap={false}
         preferences={preferences}
-        onCursorChange={setCursor}
+        onCursorChange={handleCursorChange}
         onVimStateChange={handleVimStateChange}
         onChange={handleChange}
       />

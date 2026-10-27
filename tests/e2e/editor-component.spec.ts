@@ -11,6 +11,7 @@ interface FixtureState {
   doc: string;
   tabs: Record<string, string>;
   cursor: { line: number; column: number; selected: number };
+  cursorReportCount: number;
   themeId: string;
   undoDepth: number;
   mode: string;
@@ -156,6 +157,26 @@ test('Vim is off by default and ordinary typing is unchanged', async ({ page }) 
 
   await expect(editor.locator('.cm-content')).toHaveText('iabc');
   await expectState(page, { doc: 'iabc', mode: 'inactive' });
+});
+
+test('repeated selection updates coalesce into one cursor report per frame', async ({ page }) => {
+  await openEditor(page, { a: 'alpha beta gamma\ndelta epsilon' });
+
+  // Let the mount/click cursor report settle so the baseline is stable.
+  await page.evaluate(() => new Promise<void>(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  const before = await state(page);
+
+  // Three synchronous selection transactions in one task mimic repeated
+  // keydown cursor moves arriving faster than the app can render.
+  await page.evaluate(() => {
+    (window as unknown as Record<string, any>).__crumbEditor.dispatchSelections([1, 5, 11]);
+  });
+
+  await expect.poll(async () => (await state(page)).cursor).toMatchObject({ line: 1, column: 12, selected: 0 });
+  const after = await state(page);
+  expect(after.cursorReportCount - before.cursorReportCount).toBe(1);
 });
 
 test('characterwise Visual mode shows the exact selected characters, including the cursor cell', async ({ page }) => {

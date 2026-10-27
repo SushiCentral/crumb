@@ -104,6 +104,41 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
   onVimStateChangeRef.current = onVimStateChange;
   onSaveRequestRef.current = onSaveRequest;
 
+  // Selection-only cursor reporting is coalesced to at most one callback per
+  // animation frame. Repeated keydown navigation would otherwise re-render App
+  // for every intermediate cursor position. Only the latest cursor is retained;
+  // the frame callback flushes it once the current navigation burst settles.
+  // Doc edits and lifecycle reports stay synchronous so consumers never read a
+  // cursor from before a committed change.
+  const cursorFrameRef = useRef<number | null>(null);
+  const pendingCursorRef = useRef<CursorInfo | null>(null);
+
+  const cancelCursorChange = () => {
+    if (cursorFrameRef.current !== null) {
+      cancelAnimationFrame(cursorFrameRef.current);
+      cursorFrameRef.current = null;
+    }
+    pendingCursorRef.current = null;
+  };
+
+  const reportCursorNow = (state: EditorState) => {
+    // A synchronous report supersedes any deferred selection-only report, so a
+    // later frame cannot overwrite it with a stale cursor.
+    cancelCursorChange();
+    onCursorChangeRef.current?.(cursorInfo(state));
+  };
+
+  const scheduleCursorChange = (state: EditorState) => {
+    pendingCursorRef.current = cursorInfo(state);
+    if (cursorFrameRef.current !== null) return;
+    cursorFrameRef.current = requestAnimationFrame(() => {
+      cursorFrameRef.current = null;
+      const cursor = pendingCursorRef.current;
+      pendingCursorRef.current = null;
+      if (cursor) onCursorChangeRef.current?.(cursor);
+    });
+  };
+
   // One extension instance per Editor. Engine mappings and registers remain
   // global; the mapping installer is reference-counted across distinct
   // instances, which is what makes split panes safe. `:w` captures the
@@ -192,7 +227,8 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
       languageCompartment.of([]),
       appearanceCompartment.of(editorAppearance(currentTheme, currentFontSize, fontFamily)),
       EditorView.updateListener.of(update => {
-        if (update.docChanged || update.selectionSet) onCursorChangeRef.current?.(cursorInfo(update.state));
+        if (update.docChanged) reportCursorNow(update.state);
+        else if (update.selectionSet) scheduleCursorChange(update.state);
         if (!update.docChanged) return;
         statesRef.current.set(activeTabRef.current, update.state);
         const external = update.transactions.some(transaction => transaction.annotation(externalDocUpdate));
@@ -217,11 +253,12 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
     statesRef.current.set(tabId, state);
     vimBindingRef.current = vimSession.attachPane(paneId, view, tabId, preferences.vimModeEnabled);
     subscribeVimState();
-    onCursorChangeRef.current?.(cursorInfo(state));
+    reportCursorNow(state);
 
     return () => {
       // Finalize/restore session state while the adapter is still alive; the
       // session, not an individual pane, decides when a document has closed.
+      cancelCursorChange();
       vimStateSubscriptionRef.current?.();
       vimStateSubscriptionRef.current = null;
       vimBindingRef.current?.detach();
@@ -260,7 +297,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
     binding?.setEnabled(enabled);
     if (enabled) binding?.afterTransition(activeTab);
     subscribeVimState();
-    onCursorChangeRef.current?.(cursorInfo(view.state));
+    reportCursorNow(view.state);
   }, [preferences.vimModeEnabled, vimCompartment, vim]);
 
   // Peer panes exchange ratios through the scroll-sync bus. Declared after the
@@ -312,7 +349,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
         preferencesCompartment.reconfigure([editorPreferenceExtensions(preferences), wordWrap ? EditorView.lineWrapping : []]),
       ],
     });
-    onCursorChangeRef.current?.(cursorInfo(view.state));
+    reportCursorNow(view.state);
   }, [tabId, theme, fontSize, fontFamily, wordWrap, preferences, vimCompartment, vim]);
 
   useEffect(() => {
