@@ -139,7 +139,7 @@ const getFileNameFromPath = (path: string | null) => {
 };
 
 export default function App() {
-  const [isPanelOpen, setIsPanelOpen] = useState(true);
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<'explorer' | 'search'>(() => readPreference('crumb.sidebarTab', 'explorer') === 'search' ? 'search' : 'explorer');
   const [sidebarWidth, setSidebarWidth] = useState(() => clampSidebarWidth(readNumber(readPreference('crumb.sidebarWidth', ''), defaultSidebarWidth, 160, 10000), window.innerWidth));
@@ -184,7 +184,6 @@ export default function App() {
 
   const [activeTerminalSessionId, setActiveTerminalSessionId] = useState<string | null>(null);
   const [terminalFocusRequest, setTerminalFocusRequest] = useState(0);
-  const [openTerminalRequest, setOpenTerminalRequest] = useState<{ path: string; sequence: number } | null>(null);
   const [terminalFolderError, setTerminalFolderError] = useState<string | null>(null);
 
   const tabsRef = useRef(tabs);
@@ -607,9 +606,6 @@ export default function App() {
   const handleFolderOpened = (path: string) => {
     setExplorerRootPath(path);
     addRecentProject(path);
-    setOpenTerminalRequest(previous => ({ path, sequence: (previous?.sequence ?? 0) + 1 }));
-    setIsPanelOpen(true);
-    setTerminalFocusRequest(value => value + 1);
   };
 
   const handleOpenRecentProject = async (path: string) => {
@@ -1490,7 +1486,7 @@ export default function App() {
           display: isPanelOpen ? "block" : "none"
         }}
       >
-        <BottomPanel isOpen={isPanelOpen} clearPromptOnStart={clearPromptOnStart} onClose={() => setIsPanelOpen(false)} onActiveSessionChange={setActiveTerminalSessionId} theme={theme} fontSize={fontSize} fontFamily={codeFont} focusRequest={terminalFocusRequest} workingDirectory={explorerRootPath} openTerminalRequest={openTerminalRequest} />
+        <BottomPanel isOpen={isPanelOpen} clearPromptOnStart={clearPromptOnStart} onClose={() => setIsPanelOpen(false)} onActiveSessionChange={setActiveTerminalSessionId} theme={theme} fontSize={fontSize} fontFamily={codeFont} focusRequest={terminalFocusRequest} workingDirectory={explorerRootPath} />
       </div>
 
       <StatusBar hasDocument={activeTab != null} cursor={activeCursor} vimStatus={vimStatus} preferences={editorPreferences} lineEnding={activeLineEnding} language={activeTab ? languageName(activeTab.path) : 'No file'} wordWrap={wordWrap} zoom={zoomLevel} theme={theme.name} />

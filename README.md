@@ -82,7 +82,7 @@ Word wrap is on by default and can be toggled through **Editor: Enable/Disable W
 
 When a Markdown file is active, the top bar shows **Preview**. It opens a rendered pane beside the editors and updates as you type. The preview supports GitHub-style tables and task lists, images stored beside the file, and links. Click **Preview** again to close that pane. A Markdown preview can stay open while you add more editor splits. The same action is available in the command palette.
 
-Opening a folder with **Open Folder** also opens and focuses a new terminal in that folder. **Terminal folder** only changes the Explorer folder. The top search bar finds files by name in the open folder; unsupported file types open as plain text.
+Opening a folder with **Open Folder** updates the Explorer and recent projects without opening, focusing, or spawning a terminal. **Terminal folder** only changes the Explorer folder. The top search bar finds files by name in the open folder; unsupported file types open as plain text.
 
 The color palettes are inspired by [One Dark Pro](https://github.com/Binaryify/OneDark-Pro), [Dracula](https://github.com/dracula/dracula-theme), [Catppuccin](https://github.com/catppuccin/palette), [Nord](https://github.com/nordtheme/nord), [Tokyo Night](https://github.com/enkia/tokyo-night-vscode-theme), [Gruvbox](https://github.com/morhetz/gruvbox), [Rosé Pine](https://github.com/rose-pine/rose-pine-theme), and [Solarized](https://github.com/altercation/solarized). Crumb arranges interface colors for its own layout. Bundled fonts are Inter, Space Grotesk, JetBrains Mono, IBM Plex Mono, and Fira Code.
 

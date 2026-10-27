@@ -17,6 +17,10 @@ const TERMINAL_KEYS = [
 ];
 
 async function focusTerminal(page: Page): Promise<void> {
+  // The terminal panel is hidden by default; reveal it explicitly before
+  // interacting with xterm.
+  await page.keyboard.press('Control+Backquote');
+  await expect(page.locator('.bottom-panel-container')).toBeVisible();
   await page.locator('.xterm').first().click();
   await expect(page.locator('.xterm-helper-textarea').first()).toBeFocused();
   await expect.poll(async () => (await appStub(page)).spawnCalls).toBeGreaterThan(0);
@@ -175,6 +179,11 @@ test.describe('ordinary text input focus owns conflicting Ctrl bindings', () => 
     test(`${label} in the Search files input does not run its App action`, async ({ page }) => {
       await openApp(page, { vim: true });
       await newFile(page);
+      // Open the terminal first so the assertion below proves Ctrl-J did not
+      // close an already-visible panel.
+      await page.keyboard.press('Control+Backquote');
+      await expect(page.locator('.bottom-panel-container')).toBeVisible();
+      await focusEditor(page);
       await focusQuickOpen(page);
 
       await page.keyboard.press(key);
