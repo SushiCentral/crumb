@@ -8,6 +8,9 @@ export type ScrollRatioListener = (ratio: number) => void;
  * keeps both bars in the same frame with no React work at all.
  */
 
+/** Positional tolerance in CSS pixels, independent of document length. */
+const TOLERANCE_PX = 1;
+
 const listeners = new Map<string, Set<ScrollRatioListener>>();
 
 export function subscribeScrollRatio(tabId: string, listener: ScrollRatioListener): () => void {
@@ -31,28 +34,31 @@ export function publishScrollRatio(tabId: string, ratio: number): void {
 }
 
 export function attachScrollSync(el: HTMLElement, tabId: string): () => void {
-  // Echo suppression by value, not by time: a frame-based flag would swallow
-  // a genuine user scroll that arrives within the same frame.
-  let programmaticRatio: number | null = null;
+  // Echo suppression compares the offset the browser actually accepted for a
+  // programmatic write with the offset reported by the resulting scroll event.
+  // A ratio-based test widens with document length (0.005 of a million-pixel
+  // document is 5,000px) and can swallow a genuine user scroll.
+  let expectedOffset: number | null = null;
 
   const unsubscribe = subscribeScrollRatio(tabId, ratio => {
     const max = el.scrollHeight - el.clientHeight;
     if (max <= 0) return;
-    if (Math.abs(el.scrollTop / max - ratio) <= 0.005) return;
-    programmaticRatio = ratio;
-    el.scrollTop = ratio * max;
+    const target = ratio * max;
+    if (Math.abs(el.scrollTop - target) <= TOLERANCE_PX) return;
+    el.scrollTop = target;
+    // Read back: browsers clamp to the scroll range and may round the value.
+    expectedOffset = el.scrollTop;
   });
 
   const report = () => {
     const max = el.scrollHeight - el.clientHeight;
     if (max <= 0) return;
-    const ratio = el.scrollTop / max;
-    if (programmaticRatio != null) {
-      const echoed = Math.abs(ratio - programmaticRatio) <= 0.005;
-      programmaticRatio = null;
+    if (expectedOffset != null) {
+      const echoed = Math.abs(el.scrollTop - expectedOffset) <= TOLERANCE_PX;
+      expectedOffset = null;
       if (echoed) return;
     }
-    publishScrollRatio(tabId, ratio);
+    publishScrollRatio(tabId, el.scrollTop / max);
   };
   el.addEventListener('scroll', report, { passive: true });
 

@@ -16,11 +16,13 @@ export interface EditorPreferences {
   highlightActiveLine: boolean;
   indentSize: 2 | 3 | 4;
   indentWith: 'spaces' | 'tabs';
+  vimModeEnabled: boolean;
 }
 
 export const defaultEditorPreferences: EditorPreferences = {
   lineNumbers: true, bracketMatching: true, autoCloseBrackets: true,
   highlightActiveLine: true, indentSize: 2, indentWith: 'spaces',
+  vimModeEnabled: false,
 };
 
 export function readEditorPreferences(read: (key: string) => string | null): EditorPreferences {
@@ -32,6 +34,7 @@ export function readEditorPreferences(read: (key: string) => string | null): Edi
     highlightActiveLine: readBoolean(read('crumb.highlightActiveLine'), true),
     indentSize: size === 2 || size === 3 || size === 4 ? size : 2,
     indentWith: read('crumb.indentWith') === 'tabs' ? 'tabs' : 'spaces',
+    vimModeEnabled: readBoolean(read('crumb.vimModeEnabled'), false),
   };
 }
 

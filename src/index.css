@@ -17,6 +17,15 @@ body,
     height: 100%;
 }
 
+/* Vim renders its active block cursor as .cm-fat-cursor. In characterwise
+   Visual mode it is the selected endpoint, so blend it into the exact text
+   selection and keep the glyph readable in both light and dark themes. */
+.cm-editor.vim-visual-mode .cm-fat-cursor {
+    background: var(--selection) !important;
+    color: var(--text) !important;
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 .cm-scroller {
     overflow: auto;
 }
@@ -142,6 +151,9 @@ body,
 .status-bar { flex: none; min-height: 26px; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 3px 12px; border-top: 1px solid var(--border); background: var(--activity); color: var(--muted); font: 12px var(--ui-font); overflow-x: auto; white-space: nowrap; }
 .status-bar-group { display: flex; align-items: center; gap: 14px; flex: none; }
 .status-bar-right { margin-left: auto; }
+.vim-status { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+.vim-status-mode { padding: 2px 6px; border-radius: 3px; background: var(--accent); color: var(--accent-text); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.vim-status-pending { color: var(--text); }
 .explorer-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: none; height: var(--pane-header-height); min-height: var(--pane-header-height); padding: 4px 12px; border-bottom: 1px solid var(--border); }
 .explorer-header strong { font-size: 12px; font-weight: 600; color: var(--text); }
 .explorer-actions { display: flex; align-items: center; gap: 2px; }
