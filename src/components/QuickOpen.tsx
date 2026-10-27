@@ -1,5 +1,4 @@
 import { shortcutLabel } from '../lib/platform';
-import { createPointerMoveGuard } from '../lib/pointer-selection';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { readDir } from '@tauri-apps/plugin-fs';
 
@@ -30,7 +29,6 @@ const QuickOpen = forwardRef<QuickOpenHandle, Props>(function QuickOpen({ rootPa
   const [loading, setLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const pointerMoveGuardRef = useRef(createPointerMoveGuard());
 
   useImperativeHandle(ref, () => ({ focus: () => { setIndexedRoot(null); setQuery(''); inputRef.current?.focus(); setOpen(true); } }), []);
 
@@ -117,7 +115,7 @@ const QuickOpen = forwardRef<QuickOpenHandle, Props>(function QuickOpen({ rootPa
       {loading && <div className="quick-open-hint">Finding files in this folder…</div>}
       {!loading && matches.length === 0 && <div className="quick-open-hint">{query ? 'No matching files' : 'Type to search files'}</div>}
       {matches.map((path, index) => <button key={path} className={`quick-open-result ${index === selected ? 'selected' : ''}`}
-        role="option" aria-selected={index === selected} onMouseMove={event => { if (pointerMoveGuardRef.current(event)) setSelected(index); }} onClick={() => choose(path)} title={path}>
+        role="option" aria-selected={index === selected} onMouseMove={event => { if (event.movementX !== 0 || event.movementY !== 0) setSelected(index); }} onClick={() => choose(path)} title={path}>
         <span>{fileName(path)}</span><small>{rootPath && path.startsWith(rootPath) ? path.slice(rootPath.length).replace(/^[/\\]/, '') : path}</small>
       </button>)}
     </div>}
