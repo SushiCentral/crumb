@@ -147,6 +147,8 @@ export default function App() {
   const [zoomLevel, setZoomLevel] = useState(() => readNumber(readPreference('crumb.zoom', ''), 1, 0.5, 2));
   const [explorerRootPath, setExplorerRootPath] = useState<string | null>(null);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+  const [paletteInitialMode, setPaletteInitialMode] = useState<'commands' | 'files'>('commands');
+  const [paletteMode, setPaletteMode] = useState<'commands' | 'files'>('commands');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>(() => parseRecentProjects(readPreference('crumb.recentProjects', '[]')));
@@ -461,6 +463,15 @@ export default function App() {
 
   const openPalette = () => {
     rememberFocusInvoker();
+    setPaletteInitialMode('commands');
+    setPaletteMode('commands');
+    setIsPaletteOpen(true);
+  };
+
+  const openQuickOpen = () => {
+    rememberFocusInvoker();
+    setPaletteInitialMode('files');
+    setPaletteMode('files');
     setIsPaletteOpen(true);
   };
 
@@ -974,11 +985,10 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "p") {
         e.preventDefault();
         e.stopPropagation();
-        if (isPaletteOpen) {
-          setIsPaletteOpen(false);
-          restoreInvokerFocus();
-        } else {
-          openPalette();
+        if (!isPaletteOpen) openPalette();
+        else if (paletteMode !== 'commands') {
+          setPaletteInitialMode('commands');
+          setPaletteMode('commands');
         }
         return;
       }
@@ -1006,8 +1016,12 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         e.stopPropagation();
-        rememberFocusInvoker();
-        quickOpenRef.current?.focus();
+        openQuickOpen();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        void handleSaveFile();
         return;
       }
       if (isPaletteOpen) return;
@@ -1068,10 +1082,6 @@ export default function App() {
         return;
       }
 
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
-        e.preventDefault();
-        void handleSaveFile();
-      }
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
@@ -1093,7 +1103,7 @@ export default function App() {
     { id: 'font-reset', label: 'Appearance: Reset Font Size', detail: '13px', shortcut: shortcutLabel('Shift+0'), run: () => { setFontSize(13); restoreInvokerFocus(); } },
     { id: 'open', label: 'File: Open File', shortcut: shortcutLabel('O'), run: () => { void handleOpenFile().then(opened => { if (!opened) restoreInvokerFocus(); }); } },
     { id: 'open-folder', label: 'File: Open Folder / Project', run: () => { void handleChooseFolder().then(opened => { if (!opened) restoreInvokerFocus(); }); } },
-    { id: 'quick-open', label: 'File: Search Files', shortcut: shortcutLabel('P'), run: () => quickOpenRef.current?.focus() },
+    { id: 'quick-open', label: 'File: Search Files', shortcut: shortcutLabel('P'), run: () => {} },
     { id: 'new', label: 'File: New File', shortcut: shortcutLabel('N'), run: addUntitledTab },
     ...(tabs.length > 0 ? [{ id: 'close-all', label: 'File: Close All Tabs', run: closeAllTabsAndPanes }] : []),
     ...(activeTab ? [{ id: 'save', label: 'File: Save File', shortcut: shortcutLabel('S'), run: () => { void handleSaveFile().then(() => restoreInvokerFocus()); } }] : []),
@@ -1120,10 +1130,12 @@ export default function App() {
             onThemeChange={setThemeId}
             onClose={closePalette}
             onRunCommand={command => command.run()}
+            initialMode={paletteInitialMode}
+            onModeChange={setPaletteMode}
+            renderFileSearch={onBack => <QuickOpen ref={quickOpenRef} rootPath={explorerRootPath} openPaths={tabs.flatMap(tab => tab.path ? [tab.path] : [])} onOpenFile={path => { closePalette('command'); void handleOpenFile(path); }} onActivate={rememberFocusInvoker} onDismiss={dismissQuickOpen} embedded onBack={onBack} />}
           />}
         </div>
         <div className="top-bar-actions">
-          <QuickOpen ref={quickOpenRef} rootPath={explorerRootPath} openPaths={tabs.flatMap(tab => tab.path ? [tab.path] : [])} onOpenFile={path => { void handleOpenFile(path); }} onActivate={rememberFocusInvoker} onDismiss={dismissQuickOpen} />
           {canPreviewMarkdown && <button className={`markdown-preview-toggle ${isPreviewOpen ? 'active' : ''}`} aria-pressed={isPreviewOpen} title={isPreviewOpen ? 'Hide Markdown preview' : 'Open Markdown preview to the side'} onClick={toggleMarkdownPreview}><SplitPreviewIcon /><span>Preview</span></button>}
         </div>
       </header>

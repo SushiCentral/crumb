@@ -23,8 +23,8 @@ async function focusTerminal(page: Page): Promise<void> {
 }
 
 async function focusQuickOpen(page: Page): Promise<void> {
+  await page.keyboard.press('Control+p');
   const input = page.getByRole('combobox', { name: 'Search files' });
-  await input.click();
   await expect(input).toBeFocused();
 }
 
@@ -58,7 +58,9 @@ test.describe('terminal focus owns its Ctrl bindings', () => {
         await expect(page.getByRole('button', { name: 'Toggle file explorer' })).toHaveClass(/active/);
       }
       if (key === 'Control+p') {
-        await expect(page.getByRole('combobox', { name: 'Search files' })).not.toBeFocused();
+        await expect(page.locator('.command-palette')).toHaveCount(0);
+        await expect(page.getByRole('combobox', { name: 'Search files' })).toHaveCount(0);
+        await expect(page.locator('.xterm-helper-textarea').first()).toBeFocused();
       }
     });
   }
@@ -185,7 +187,7 @@ test.describe('ordinary text input focus owns conflicting Ctrl bindings', () => 
     });
   }
 
-  test('Search files input keeps global Ctrl-S and Ctrl-Shift-P shortcuts', async ({ page }) => {
+  test('Search files keeps Ctrl-S save and Ctrl-Shift-P opens commands', async ({ page }) => {
     await openApp(page, {
       vim: true,
       openQueue: ['/tmp/quick-open-save.ts'],
@@ -198,6 +200,9 @@ test.describe('ordinary text input focus owns conflicting Ctrl bindings', () => 
     await page.keyboard.press('Escape');
     await focusQuickOpen(page);
 
+    await expect(page.locator('.command-palette')).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'Search files' })).toBeFocused();
+
     await page.keyboard.press('Control+s');
     await expect.poll(async () => (await appStub(page)).writeCalls).toHaveLength(1);
     expect((await appStub(page)).writeCalls[0]).toMatchObject({
@@ -207,6 +212,7 @@ test.describe('ordinary text input focus owns conflicting Ctrl bindings', () => 
 
     await page.keyboard.press('Control+Shift+p');
     await expect(page.locator('.command-palette')).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'Search commands' })).toBeFocused();
   });
 });
 

@@ -69,32 +69,6 @@ test.describe('palette focus restoration', () => {
     await expect(page.locator('.vim-status')).toHaveAttribute('aria-label', 'Vim mode: normal');
   });
 
-  test('a stale deferred restoration loses to a newer user focus decision', async ({ page }) => {
-    await openApp(page, { vim: true });
-    await newFile(page);
-    await focusEditor(page);
-    await openPalette(page);
-
-    await page.evaluate(() => {
-      const paletteInput = document.querySelector<HTMLInputElement>('.palette-input');
-      if (!paletteInput) throw new Error('Palette input is missing');
-      paletteInput.dispatchEvent(new KeyboardEvent('keydown', {
-        key: 'Escape',
-        code: 'Escape',
-        bubbles: true,
-        cancelable: true,
-      }));
-      document.querySelector<HTMLInputElement>('.quick-open input')?.focus();
-    });
-
-    const quickOpenInput = page.getByRole('combobox', { name: 'Search files' });
-    await expect(page.locator('.command-palette')).toHaveCount(0);
-    await expect(quickOpenInput).toBeFocused();
-    await page.waitForTimeout(200);
-    await expect(quickOpenInput).toBeFocused();
-    await expect(page.locator('.cm-content')).not.toBeFocused();
-  });
-
   test('an outside click on Settings leaves focus where the user clicked', async ({ page }) => {
     await openApp(page, { vim: true });
     await newFile(page);
@@ -110,6 +84,44 @@ test.describe('palette focus restoration', () => {
 });
 
 test.describe('palette direction handoffs', () => {
+  test('Ctrl+P and the palette Search Files command use the shared palette surface', async ({ page }) => {
+    await openApp(page, { vim: true });
+    await newFile(page);
+    await focusEditor(page);
+
+    await page.keyboard.press('Control+p');
+    const palette = page.locator('.command-palette');
+    const fileSearch = page.getByRole('combobox', { name: 'Search files' });
+    await expect(palette).toBeVisible();
+    await expect(fileSearch).toBeFocused();
+    await expect(page.locator('.top-bar-actions .quick-open')).toHaveCount(0);
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('combobox', { name: 'Search commands' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(palette).toHaveCount(0);
+    await expect(activeEditorContent(page)).toBeFocused();
+
+    await openPalette(page);
+    await page.keyboard.press('Control+p');
+    await expect(fileSearch).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('combobox', { name: 'Search commands' })).toBeFocused();
+    await page.keyboard.press('Escape');
+
+    await openPalette(page);
+    await page.locator('.palette-input').fill('File: Search Files');
+    await page.keyboard.press('Enter');
+    await expect(palette).toBeVisible();
+    await expect(fileSearch).toBeFocused();
+    await expect(page.locator('.palette-back')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Back to commands' }).click();
+    await expect(page.getByRole('combobox', { name: 'Search commands' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(palette).toHaveCount(0);
+  });
+
   test('Settings receives focus, and cancelling it returns to the invoking editor', async ({ page }) => {
     await openApp(page, { vim: true });
     await newFile(page);
@@ -152,12 +164,16 @@ test.describe('palette direction handoffs', () => {
     await newFile(page);
     await focusEditor(page);
 
-    await runPaletteCommand(page, 'File: Search Files');
+    await openPalette(page);
+    await page.locator('.palette-input').fill('File: Search Files');
+    await page.keyboard.press('Enter');
     const quickOpenInput = page.getByRole('combobox', { name: 'Search files' });
     await expect(quickOpenInput).toBeFocused();
 
     await page.keyboard.press('Escape');
-    await expect(quickOpenInput).not.toBeFocused();
+    await expect(page.getByRole('combobox', { name: 'Search commands' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(quickOpenInput).toHaveCount(0);
     await expect(activeEditorContent(page)).toBeFocused();
   });
 
@@ -354,8 +370,10 @@ test.describe('Quick Open focus destinations', () => {
     const quickOpenInput = page.getByRole('combobox', { name: 'Search files' });
     await expect(quickOpenInput).toBeFocused();
     await page.keyboard.press('Escape');
+    await expect(page.getByRole('combobox', { name: 'Search commands' })).toBeFocused();
+    await page.keyboard.press('Escape');
 
-    await expect(quickOpenInput).not.toBeFocused();
+    await expect(quickOpenInput).toHaveCount(0);
     await expect(activeEditorContent(page)).toBeFocused();
   });
 
@@ -367,9 +385,9 @@ test.describe('Quick Open focus destinations', () => {
     const quickOpenInput = page.getByRole('combobox', { name: 'Search files' });
     await expect(quickOpenInput).toBeFocused();
 
-    await page.locator('.top-bar-brand').click();
+    await page.locator('.palette-overlay').click({ position: { x: 8, y: 8 } });
 
-    await expect(quickOpenInput).not.toBeFocused();
+    await expect(quickOpenInput).toHaveCount(0);
     await expect(page.locator('.cm-content')).not.toBeFocused();
   });
 });

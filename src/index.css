@@ -41,12 +41,13 @@ body,
 .command-trigger svg { flex: none; color: var(--muted); }
 .command-trigger span { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .command-trigger kbd { flex: none; padding: 1px 4px; border: 1px solid var(--border); border-radius: 3px; color: var(--muted); font: 12px var(--ui-font); white-space: nowrap; }
-.top-bar-actions .quick-open { flex: 1 1 260px; min-width: 0; max-width: 260px; }
 .top-bar-actions button { flex: none; min-height: 28px; padding: 4px 9px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; font: inherit; }
 .top-bar-actions button:hover { background: var(--hover); color: var(--text); }
 .top-bar-actions .markdown-preview-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--label-detail); }
 .top-bar-actions .markdown-preview-toggle.active { border-color: var(--accent); background: var(--selection); color: var(--label-active); }
 .quick-open { position: relative; display: flex; align-items: center; height: 29px; border: 1px solid var(--border); border-radius: 7px; background: var(--editor); color: var(--muted); }
+.quick-open-embedded { width: 100%; height: 100%; border: 0; border-radius: 0; background: transparent; }
+.quick-open-embedded input { font: 13px var(--ui-font); }
 .quick-open:focus-within { border-color: var(--accent); }
 .quick-open-icon { flex: none; margin-left: 9px; color: var(--label-detail); }
 .quick-open input { flex: 1; min-width: 0; height: 100%; padding: 0 8px; outline: 0; border: 0; background: transparent; color: var(--text); font: inherit; }
@@ -63,12 +64,8 @@ body,
 @media (max-width: 720px) {
   .top-bar { grid-template-columns: minmax(40px, 1fr) minmax(100px, 2fr) auto; gap: 8px; }
   .command-center.open { position: absolute; grid-column: auto; top: 7px; right: 12px; left: 12px; z-index: 2; }
-  .command-trigger kbd, .quick-open kbd, .markdown-preview-toggle span { display: none; }
+  .command-trigger kbd, .markdown-preview-toggle span { display: none; }
   .top-bar-actions { gap: 4px; }
-  .top-bar-actions .quick-open { flex: none; width: 30px; max-width: none; height: 30px; border-color: transparent; background: transparent; }
-  .top-bar-actions .quick-open:not(:focus-within) input { position: absolute; inset: 0; width: 100%; padding: 0; opacity: 0; cursor: pointer; }
-  .top-bar-actions .quick-open:not(:focus-within) .quick-open-results { display: none; }
-  .top-bar-actions .quick-open:focus-within { position: absolute; top: 7px; right: 12px; left: 12px; width: auto; background: var(--panel); border-color: var(--accent); }
 }
 
 .editor-tabs { display: flex; height: 100%; min-height: 0; overflow-x: auto; background: var(--sidebar); border-bottom: 1px solid var(--border); }

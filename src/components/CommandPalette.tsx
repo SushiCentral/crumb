@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { SearchIcon } from './Icons';
 import { codeFonts, type Theme } from '../lib/themes';
 
@@ -28,6 +28,9 @@ interface Props {
   onClose: (reason: CommandPaletteCloseReason) => void;
   /** Runs a command after the palette has released focus. */
   onRunCommand?: (command: PaletteCommand) => void;
+  initialMode?: 'commands' | 'files';
+  renderFileSearch?: (onBack: () => void) => ReactNode;
+  onModeChange?: (mode: 'commands' | 'files') => void;
 }
 
 function CommandLabel({ command }: { command: PaletteCommand }) {
@@ -43,8 +46,8 @@ function CommandLabel({ command }: { command: PaletteCommand }) {
   </span>;
 }
 
-export default function CommandPalette({ triggerRef, commands, themes, currentThemeId, codeFontOverride, onThemeChange, onCodeFontChange, onClose, onRunCommand }: Props) {
-  const [mode, setMode] = useState<'commands' | 'themes' | 'fonts'>('commands');
+export default function CommandPalette({ triggerRef, commands, themes, currentThemeId, codeFontOverride, onThemeChange, onCodeFontChange, onClose, onRunCommand, initialMode = 'commands', renderFileSearch, onModeChange }: Props) {
+  const [mode, setMode] = useState<'commands' | 'themes' | 'fonts' | 'files'>(initialMode);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -73,6 +76,15 @@ export default function CommandPalette({ triggerRef, commands, themes, currentTh
     else triggerRef.current?.focus();
     };
   }, [triggerRef]);
+  useEffect(() => {
+    if (mode === 'files') containerRef.current?.querySelector<HTMLInputElement>('.quick-open input')?.focus();
+    else inputRef.current?.focus();
+  }, [mode]);
+  useEffect(() => {
+    setMode(initialMode);
+    setQuery('');
+    setSelectedIndex(0);
+  }, [initialMode]);
   const options = useMemo(() => {
     const search = query.trim().toLowerCase();
     if (mode === 'themes') return themes.filter(theme => theme.name.toLowerCase().includes(search));
@@ -84,8 +96,9 @@ export default function CommandPalette({ triggerRef, commands, themes, currentTh
     listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
   }, [selectedIndex, mode, query]);
 
-  const changeMode = (next: 'commands' | 'themes' | 'fonts') => {
+  const changeMode = (next: 'commands' | 'themes' | 'fonts' | 'files') => {
     setMode(next);
+    onModeChange?.(next === 'files' ? 'files' : 'commands');
     setQuery('');
     setSelectedIndex(0);
     inputRef.current?.focus();
@@ -104,6 +117,7 @@ export default function CommandPalette({ triggerRef, commands, themes, currentTh
       const command = choice as PaletteCommand;
       if (command.id === 'theme') changeMode('themes');
       else if (command.id === 'code-font') changeMode('fonts');
+      else if (command.id === 'quick-open') changeMode('files');
       else {
         // The command (or its onRunCommand handler) owns focus from here; the
         // inline command palette must not pull focus back on unmount.
@@ -124,11 +138,12 @@ export default function CommandPalette({ triggerRef, commands, themes, currentTh
         ref={containerRef}
         className="command-palette"
         role="search"
-        aria-label="Commands"
+        aria-label={mode === 'files' ? 'Search files' : 'Commands'}
         onKeyDown={event => {
-          if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose('cancel'); }
+          if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (mode === 'files') changeMode('commands'); else onClose('cancel'); }
         }}
       >
+        {mode === 'files' ? renderFileSearch?.(() => changeMode('commands')) : <>
         <div className="palette-input-row">
           {mode !== 'commands' ? <button className="palette-back" onClick={() => changeMode('commands')} aria-label="Back to commands">‹</button> : <SearchIcon />}
           <input
@@ -201,6 +216,7 @@ export default function CommandPalette({ triggerRef, commands, themes, currentTh
             </button>
           ))}
         </div>
+        </>}
       </div>
     </>
   );
