@@ -63,7 +63,9 @@ The initial leader actions are:
 - `Space b d` closes the current tab through the unsaved-change confirmation;
   `Space b D` discards changes and closes it.
 - `Space s w` searches the workspace for the word under the cursor as literal
-  text; `Space s h` clears Vim search highlighting without forgetting the search.
+  text and focuses Search. With no word under the cursor it still opens and
+  focuses Search, but leaves the existing query and results unchanged.
+  `Space s h` clears Vim search highlighting without forgetting the search.
 - `Space u w` toggles word wrap; `Space u n` toggles line numbers. Both settings
   persist through the existing editor preferences.
 

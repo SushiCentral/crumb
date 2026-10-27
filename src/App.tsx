@@ -1,4 +1,4 @@
-import { Fragment, lazy, Suspense, useState, useEffect, useMemo, useRef } from "react";
+import { Fragment, lazy, startTransition, Suspense, useState, useEffect, useMemo, useRef } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeTextFile, stat } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
@@ -294,10 +294,15 @@ export default function App() {
   useEffect(() => { if (!isSettingsOpen) setPreviewThemeId(null); }, [isSettingsOpen]);
 
   const reportCursor = (paneId: string, cursor: CursorInfo) => {
-    setPaneCursors(previous => {
-      const old = previous[paneId];
-      return old?.line === cursor.line && old.column === cursor.column && old.selected === cursor.selected
-        ? previous : { ...previous, [paneId]: cursor };
+    // This snapshot only feeds the status bar. Keep its whole-App render
+    // interruptible so held cursor keys take priority over reporting them.
+    // Shortcut routing reads the live editor state, not this snapshot.
+    startTransition(() => {
+      setPaneCursors(previous => {
+        const old = previous[paneId];
+        return old?.line === cursor.line && old.column === cursor.column && old.selected === cursor.selected
+          ? previous : { ...previous, [paneId]: cursor };
+      });
     });
   };
 
@@ -932,8 +937,10 @@ export default function App() {
 
   const searchForCursorWord = (target: VimEditorTarget) => {
     const word = editorRefs.current.get(target.paneId)?.getCursorWord();
-    if (!word) return;
+    // `Space s w` always reveals Search; without a word it only focuses the
+    // panel, leaving any existing query and results untouched.
     showSearchSidebar();
+    if (!word) return;
     searchRequestIdRef.current += 1;
     setSearchRequest({ term: word, id: searchRequestIdRef.current });
   };
