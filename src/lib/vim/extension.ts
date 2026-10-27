@@ -9,6 +9,8 @@ import {
   vimLeaderSuppressedByMappings,
   type VimLeaderExtensionOptions,
 } from './leader.ts';
+import { createVimSurroundExtension, vimSurroundSuppressedByMappings } from './surround.ts';
+import { installVimCommentOperator } from './comments.ts';
 import {
   cancelTransientInput,
   captureVimAdapter,
@@ -104,6 +106,9 @@ function installVimEngineDefaults(): void {
   // pcre=false mode handles literals, magic groups/quantifiers, boundaries,
   // and escaping once; the Crumb adapter only adjusts case sensitivity.
   Vim.setOption('pcre', false);
+  // Replace the engine's Visual-incompatible toggleComment return value before
+  // any adapter can execute `gc`. See comments.ts for the pinned-source reason.
+  installVimCommentOperator();
 }
 
 let exCommandsInstalled = false;
@@ -197,6 +202,11 @@ export function createVimExtension(
 ): VimExtension {
   installVimEngineDefaults();
   const resolvedConfig = resolveVimConfig(config);
+  // A configured operator/prefix mapping owns the keys; do not intercept the
+  // `s` that follows it.
+  const surround = createVimSurroundExtension({
+    suppressPrefixInterception: vimSurroundSuppressedByMappings(resolvedConfig.mappings),
+  });
   const hasExplicitNormalY = config.mappings.some(mapping =>
     mapping.lhs === 'Y' && mapping.modes.includes('normal'),
   );
@@ -248,6 +258,9 @@ export function createVimExtension(
 
   return {
     extension: [
+      // Surround delimiter input must see keys before the leader and the
+      // engine, and its definitions must exist before Vim parses mappings.
+      surround,
       ...(leader ? [leader] : []),
       vim({ status: false }),
       adapterLifecyclePlugin,

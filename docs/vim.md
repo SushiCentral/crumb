@@ -266,6 +266,59 @@ Other package-specific differences:
 - The Vim package may support extra commands outside this contract. They are not
   guaranteed and must not be treated as Crumb's compatibility surface.
 
+## Surround and jump-history additions
+
+- `ys{motion}{delimiter}` wraps a motion's range; `ysiw"` wraps a word.
+- `yss{delimiter}` wraps the current line.
+- `cs{old}{new}` changes an enclosing pair; `ds{delimiter}` deletes it.
+- Visual `S{delimiter}` wraps a characterwise or linewise selection, replacing
+  Visual `S`'s previous change-lines action. Blockwise surround is not supported.
+- Supported delimiters are `()` (`b`), `[]`, `{}` (`B`), `<>`, single/double
+  quotes, and backticks. Opening/closing bracket keys are equivalent; no padding
+  or indentation normalization is performed. Tags are not supported.
+- Escape or an unsupported delimiter cancels without editing. Quote lookup is
+  line-local; bracket lookup is balanced, not syntax-aware.
+- Surround motions accept ordinary character keys and text objects, but not
+  `/`/`?` prompts, arrow keys, or modified keys. Those cancel safely.
+  Modifier-only key presses leave the pending surround intact, so Shift can be
+  pressed separately to enter a quote or uppercase motion.
+- Dot-repeat is implemented for Normal-mode `ys`, `yss`, `ds`, and `cs`, with
+  browser verification still pending. Visual `S` does not replace the engine's
+  dot-repeat record; `.` can still repeat the preceding engine edit instead.
+- Conflicting configured mappings suppress Crumb's surround-prefix interception.
+  The pinned engine still cannot execute some multi-key mappings beginning
+  with its already-resolved `y`/`d`/`c` operators; suppression prevents Crumb
+  from taking over but does not add support for those mappings.
+- Ctrl+o/Ctrl+i navigate a single session-wide chronological history of native
+  jumps and open-document transitions. Locations restore line and column in
+  the invoking editor pane. Bare Tab retains its existing behavior.
+- Closed documents are pruned. Positions are clamped after edits, not tracked
+  through text changes. Cross-file `''`/double-backtick navigation is not added.
+
+The new jump history supersedes the deferred Ctrl-O/I statements in the original
+milestone matrix above. Unit coverage and authored browser regression tests are
+separate evidence: the new browser specs have not been executed under the
+no-window constraint. See [manual checks](vim-manual-checks.md) for hands-on
+verification of these additions and commenting.
+
+## Comment operator
+
+Comments use the current language's line-comment syntax:
+
+- `gcc` toggles the current line; `2gcc` toggles two lines.
+- `gcj` toggles the current and next line.
+- Select lines with `V`, extend with `j`/`k`, then press `gc` to toggle them.
+- `u` undoes the comment operation.
+
+This uses the pinned engine's `gc` bindings and CodeMirror's comment command.
+Crumb wraps the operator's Visual-mode cursor return so the engine collapses
+the selection and returns to Normal instead of re-entering Visual mode.
+A language without comment tokens leaves the text unchanged.
+Language support must finish loading before commenting is available.
+`tests/e2e/vim-comments.spec.ts` covers these cases; the new browser tests
+have been authored and type-checked, but not executed under the no-window
+testing constraint. Block-comment operators are not added by this change.
+
 ## Unsupported and deferred features
 
 The following are not part of this milestone:
@@ -279,8 +332,8 @@ The following are not part of this milestone:
 - A dedicated Vim settings panel and configurable app-versus-Vim shortcut
   precedence.
 - Full Vim/Neovim regex parity, `*` register parity, implicit unnamed-clipboard
-  synchronization, and `Ctrl-O/I` jump-list parity unless separately proven by
-  the package lifecycle tests.
+  synchronization, and complete native Vim jump-list parity beyond the
+  documented session-wide Ctrl-O/I history.
 - Any promise of full Vim/Neovim compatibility. The command matrix is the
   finite first-milestone contract, not the dependency's entire feature set.
 

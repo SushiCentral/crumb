@@ -41,6 +41,7 @@ export interface VimShortcutInput {
 const VIM_BUILTIN_CTRL_KEYS: ReadonlySet<string> = new Set([
   'w', // Vim window prefix; must never close a Crumb tab
   'o', // jump list backward
+  'i', // jump list forward
 ]);
 
 const INSERT_LIKE_MODES: ReadonlySet<VimPublicMode> = new Set<VimPublicMode>([

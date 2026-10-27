@@ -24,7 +24,7 @@ function shortcut(overrides: Partial<VimShortcutInput> = {}): boolean {
 }
 
 test('Vim owns conflicting Ctrl bindings only while enabled in a focused editor', () => {
-  for (const key of ['w', 'o']) {
+  for (const key of ['w', 'o', 'i']) {
     assert.equal(shortcut({ key }), true, `Ctrl-${key} should belong to Vim`);
   }
 

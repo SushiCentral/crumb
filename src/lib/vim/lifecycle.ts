@@ -66,6 +66,204 @@ interface VimHostAdapter extends CodeMirror {
  */
 const adapterHandlers = new WeakMap<EditorView, VimAdapterHandlers>();
 
+/** Plain engine positions. The bridge never stores adapter-bound markers. */
+export interface VimJumpPoint {
+  line: number;
+  ch: number;
+}
+
+/**
+ * Session-owned jump behavior. The lifecycle layer owns method replacement so
+ * every adapter/global reset dispatches into the same session history, while
+ * still supporting fixture adapters that have no session handler.
+ */
+export interface VimJumpBridgeHandlers {
+  add(cm: CodeMirror, oldCur: VimJumpPoint, newCur: VimJumpPoint): void;
+  move(cm: CodeMirror, signedCount: number): void;
+  find(cm: CodeMirror, offset: number): VimJumpPoint | null;
+  /** Fix a native landing column after lifecycle goal-column correction. */
+  correct(cm: CodeMirror, landing: VimJumpPoint): void;
+}
+
+export interface VimJumpMarkerLike {
+  find(): VimJumpPoint | null | undefined;
+}
+
+export interface VimJumpListLike {
+  cachedCursor?: VimJumpPoint;
+  add(cm: CodeMirror, oldCur: VimJumpPoint, newCur: VimJumpPoint): void;
+  move(cm: CodeMirror, offset: number): VimJumpMarkerLike | undefined;
+  find(cm: CodeMirror, offset: number): VimJumpPoint | null | undefined;
+}
+
+const adapterViews = new WeakMap<CodeMirror, EditorView>();
+const jumpHandlers = new WeakMap<EditorView, VimJumpBridgeHandlers>();
+const registeredJumpViews = new Set<EditorView>();
+const patchedJumpLists = new WeakSet<object>();
+const jumpVersions = new WeakMap<CodeMirror, number>();
+
+interface FallbackJumpState {
+  entries: VimJumpPoint[];
+  pointer: number;
+}
+
+const fallbackJumpStates = new WeakMap<CodeMirror, FallbackJumpState>();
+const FALLBACK_JUMP_LIMIT = 100;
+
+function jumpPointEqual(a: VimJumpPoint, b: VimJumpPoint): boolean {
+  return a.line === b.line && a.ch === b.ch;
+}
+
+function clampFallbackJumpPoint(cm: CodeMirror, point: VimJumpPoint): VimJumpPoint {
+  const lineCount = typeof cm.lineCount === 'function' ? cm.lineCount() : point.line + 1;
+  const line = Math.min(Math.max(0, point.line), Math.max(0, lineCount - 1));
+  const text = typeof cm.getLine === 'function' ? cm.getLine(line) : '';
+  const ch = Math.min(Math.max(0, point.ch), typeof text === 'string' ? text.length : point.ch);
+  return { line, ch };
+}
+
+function fallbackJumpState(cm: CodeMirror): FallbackJumpState {
+  let state = fallbackJumpStates.get(cm);
+  if (!state) {
+    state = { entries: [], pointer: -1 };
+    fallbackJumpStates.set(cm, state);
+  }
+  return state;
+}
+
+function fallbackPush(state: FallbackJumpState, point: VimJumpPoint): void {
+  const last = state.entries[state.entries.length - 1];
+  if (last && jumpPointEqual(last, point)) {
+    state.pointer = state.entries.length - 1;
+    return;
+  }
+  state.entries.push({ ...point });
+  if (state.entries.length > FALLBACK_JUMP_LIMIT) {
+    state.entries.splice(0, state.entries.length - FALLBACK_JUMP_LIMIT);
+  }
+  state.pointer = state.entries.length - 1;
+}
+
+function fallbackAdd(cm: CodeMirror, oldCur: VimJumpPoint, newCur: VimJumpPoint): void {
+  if (jumpPointEqual(oldCur, newCur)) return;
+  const state = fallbackJumpState(cm);
+  if (state.pointer < state.entries.length - 1) {
+    state.entries.splice(state.pointer + 1);
+  }
+  const from = clampFallbackJumpPoint(cm, oldCur);
+  const to = clampFallbackJumpPoint(cm, newCur);
+  if (state.entries.length === 0) {
+    fallbackPush(state, from);
+    fallbackPush(state, to);
+    return;
+  }
+  if (!jumpPointEqual(state.entries[state.pointer], from)) fallbackPush(state, from);
+  fallbackPush(state, to);
+}
+
+function fallbackMove(cm: CodeMirror, offset: number): VimJumpMarkerLike | undefined {
+  const state = fallbackJumpState(cm);
+  if (state.entries.length === 0) return undefined;
+  const step = offset < 0 ? -1 : 1;
+  let pointer = Math.min(Math.max(0, state.pointer + offset), state.entries.length - 1);
+  // Mirror the engine's skip of the position the cursor already occupies.
+  while (pointer >= 0 && pointer < state.entries.length) {
+    const point = state.entries[pointer];
+    if (!jumpPointEqual(point, cm.getCursor())) break;
+    pointer += step;
+  }
+  if (pointer < 0 || pointer >= state.entries.length) return undefined;
+  state.pointer = pointer;
+  const point = state.entries[pointer];
+  return { find: () => ({ ...point }) };
+}
+
+function fallbackFind(cm: CodeMirror, offset: number): VimJumpPoint | null {
+  const state = fallbackJumpState(cm);
+  if (state.entries.length === 0) return null;
+  const pointer = state.pointer + offset;
+  if (pointer < 0 || pointer >= state.entries.length) return null;
+  return { ...state.entries[pointer] };
+}
+
+function resolveJumpHandler(cm: CodeMirror): VimJumpBridgeHandlers | undefined {
+  const view = adapterViews.get(cm);
+  return view ? jumpHandlers.get(view) : undefined;
+}
+
+/**
+ * Replace the live list's methods in place. The object identity is preserved so
+ * the engine's `cachedCursor` (`*`/`#` origin) keeps working, and a WeakSet
+ * makes repeated installs on the same object idempotent.
+ */
+export function installVimJumpListBridge(list: VimJumpListLike): void {
+  if (patchedJumpLists.has(list)) return;
+  patchedJumpLists.add(list);
+
+  list.add = (cm, oldCur, newCur) => {
+    jumpVersions.set(cm, (jumpVersions.get(cm) ?? 0) + 1);
+    const handler = resolveJumpHandler(cm);
+    if (handler) handler.add(cm, oldCur, newCur);
+    else fallbackAdd(cm, oldCur, newCur);
+  };
+  list.move = (cm, offset) => {
+    const handler = resolveJumpHandler(cm);
+    if (handler) {
+      handler.move(cm, offset);
+      // The native jumpListWalk action then resets the cursor to the current
+      // source position. The session activates the destination after the
+      // engine stack unwinds.
+      return undefined;
+    }
+    return fallbackMove(cm, offset);
+  };
+  list.find = (cm, offset) => {
+    const handler = resolveJumpHandler(cm);
+    if (handler) return handler.find(cm, offset);
+    return fallbackFind(cm, offset);
+  };
+}
+
+function currentVimJumpList(): VimJumpListLike {
+  return Vim.getVimGlobalState_().jumpList as unknown as VimJumpListLike;
+}
+
+function ensureVimJumpListBridge(): void {
+  installVimJumpListBridge(currentVimJumpList());
+}
+
+/**
+ * Register the session jump bridge for one EditorView. The returned unsubscribe
+ * is generation-safe: a stale binding cannot remove a newer handler for the
+ * same view.
+ */
+export function registerVimJumpHandlers(
+  view: EditorView,
+  handlers: VimJumpBridgeHandlers,
+): () => void {
+  const cm = getCM(view);
+  if (cm) adapterViews.set(cm, view);
+  jumpHandlers.set(view, handlers);
+  registeredJumpViews.add(view);
+  ensureVimJumpListBridge();
+
+  return () => {
+    if (jumpHandlers.get(view) !== handlers) return;
+    jumpHandlers.delete(view);
+    registeredJumpViews.delete(view);
+    if (registeredJumpViews.size === 0) {
+      // `cachedCursor` is the engine's `*`/`#` origin. Drop it when the last
+      // session view is gone rather than leaving it on a later global list.
+      delete currentVimJumpList().cachedCursor;
+    }
+  };
+}
+
+function correctVimJumpLanding(cm: CodeMirror, landing: VimJumpPoint): void {
+  resolveJumpHandler(cm)?.correct(cm, landing);
+}
+
+
 interface SearchSnapshot {
   query: unknown;
   reversed: boolean;
@@ -372,6 +570,37 @@ function refreshGoalFromCursor(cm: CodeMirror): void {
 }
 
 /**
+ * Restore a session jump landing through the same adapter boundary that owns
+ * the Neovim goal-column cache. A plain `view.dispatch()` moves the selection
+ * but leaves `vimGoalColumns` on the old column, so a following `G`/`gg`/`j`/`k`
+ * would reuse the pre-jump goal. The session calls this after replay state is
+ * restored and before focus.
+ */
+export function restoreVimJumpCursor(
+  view: EditorView,
+  position: { line: number; ch: number },
+): boolean {
+  const cm = getCM(view);
+  if (!cm) return false;
+  const doc = view.state.doc;
+  const requestedLine = Number.isFinite(position.line) ? Math.trunc(position.line) : 0;
+  const lineNumber = Math.min(Math.max(0, requestedLine), doc.lines - 1);
+  const line = doc.line(lineNumber + 1);
+  const requestedCh = Number.isFinite(position.ch) ? Math.trunc(position.ch) : 0;
+  const ch = Math.min(Math.max(0, requestedCh), line.length);
+
+  view.dispatch({ selection: { anchor: line.from + ch }, scrollIntoView: true });
+  vimGoalColumns.set(cm, ch);
+  return true;
+}
+
+/** Read the lifecycle goal cache for focused tests/diagnostics. */
+export function getVimGoalColumn(view: EditorView): number | 'eol' | undefined {
+  const cm = getCM(view);
+  return cm ? vimGoalColumns.get(cm) : undefined;
+}
+
+/**
  * Track host mouse selection without leaving a listener/timer behind when the
  * Vim adapter is destroyed or recreated on the same EditorView.
  */
@@ -414,6 +643,10 @@ function installStartoflineCapture(): void {
   const original = Vim.handleKey;
   Vim.handleKey = ((cm, key, origin) => {
     const adapter = cm as unknown as CodeMirror;
+    // A global-state reset replaces the jump list object. Repair the replacement
+    // before the engine can add to it, without touching the old object.
+    ensureVimJumpListBridge();
+    const jumpVersionBefore = jumpVersions.get(adapter) ?? 0;
     const before = adapter.state.vim;
     const beforeCursor = adapter.getCursor();
     const previousMotion = before?.lastMotion?.name;
@@ -447,6 +680,15 @@ function installStartoflineCapture(): void {
       }
       after.lastHPos = goal === 'eol' ? Infinity : goal;
       vimGoalColumns.set(adapter, goal);
+      // Native add() recorded the engine's first-non-blank landing before this
+      // correction. Replace only that just-added same-line destination; commands
+      // that did not add a jump (j/k, plain edits) must never touch history.
+      if ((jumpVersions.get(adapter) ?? 0) !== jumpVersionBefore) {
+        const landing = after.visualMode && after.sel
+          ? { line: after.sel.head.line, ch: after.sel.head.ch }
+          : { line: cursor.line, ch: target };
+        correctVimJumpLanding(adapter, landing);
+      }
       return result;
     }
 
@@ -591,6 +833,8 @@ export function patchVimAdapter(
 ): (() => void) | null {
   const cm = getCM(view);
   if (!cm) return null;
+  adapterViews.set(cm, view);
+  ensureVimJumpListBridge();
   if (handlers) adapterHandlers.set(view, handlers);
   const active = handlers ?? adapterHandlers.get(view);
   const host = cm as VimHostAdapter;

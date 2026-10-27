@@ -717,6 +717,26 @@ export default function App() {
     if (editorPane) activatePaneTab(editorPane.id, id);
   };
 
+  // Vim Ctrl-o/Ctrl-i navigation resolves against the current committed refs,
+  // prefers the invoking editor pane, and only activates an already-open tab.
+  // The session owns cursor/scroll/focus once the target EditorView is ready.
+  useEffect(() => {
+    vimSession.setJumpNavigator(target => {
+      if (!tabsRef.current.some(tab => tab.id === target.documentId)) return null;
+      const invokingPaneId = focusedEditorPaneId();
+      const pane = panesRef.current.find(item =>
+        item.id === invokingPaneId && item.kind === 'editor',
+      ) ?? panesRef.current.find(item =>
+        item.kind === 'editor' && (item.tabId === target.documentId || item.tabIds.includes(target.documentId)),
+      ) ?? panesRef.current.find(item => item.kind === 'editor');
+      if (!pane) return null;
+      if (pane.tabId !== target.documentId) activatePaneTab(pane.id, target.documentId);
+      else if (activePaneIdRef.current !== pane.id) selectPane(pane.id);
+      return { paneId: pane.id };
+    });
+    return () => vimSession.setJumpNavigator(null);
+  }, [vimSession]);
+
   const theme = getTheme(previewThemeId ?? themeId);
   const codeFont = codeFontOverride ?? theme.codeFont;
 
