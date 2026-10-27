@@ -54,11 +54,21 @@ export default function CommandPalette({ triggerRef, commands, themes, currentTh
   const listRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef(true);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const focusCapturedRef = useRef(false);
+  const effectTokenRef = useRef(0);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
   useEffect(() => {
-    const previousFocus = document.activeElement as HTMLElement | null;
+    const token = ++effectTokenRef.current;
+    // React StrictMode replays this effect on mount. Capture the invoker only
+    // once so the replay does not record the palette input as the target.
+    if (!focusCapturedRef.current) {
+      previousFocusRef.current = document.activeElement as HTMLElement | null;
+      focusCapturedRef.current = true;
+    }
+    const container = containerRef.current;
     inputRef.current?.focus();
     const dismiss = (event: Event) => {
       if (!containerRef.current?.contains(event.target as Node)) {
@@ -69,11 +79,22 @@ export default function CommandPalette({ triggerRef, commands, themes, currentTh
     document.addEventListener('pointerdown', dismiss);
     document.addEventListener('focusin', dismiss);
     return () => {
-    document.removeEventListener('pointerdown', dismiss);
-    document.removeEventListener('focusin', dismiss);
-    if (!restoreFocusRef.current) return;
-    if (previousFocus?.isConnected && previousFocus !== document.body) previousFocus.focus();
-    else triggerRef.current?.focus();
+      document.removeEventListener('pointerdown', dismiss);
+      document.removeEventListener('focusin', dismiss);
+      if (!restoreFocusRef.current) return;
+      // A StrictMode cleanup is immediately followed by a fresh mount effect.
+      // Defer restoration and abandon it when this effect is replayed, so the
+      // synthetic cleanup cannot transiently focus (and scroll) the editor.
+      window.setTimeout(() => {
+        if (effectTokenRef.current !== token) return;
+        // A real close (Escape/cancel) may already have restored the invoker.
+        // Leave focus with whatever destination has claimed it.
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && active !== document.body && !container?.contains(active)) return;
+        const previousFocus = previousFocusRef.current;
+        if (previousFocus?.isConnected && previousFocus !== document.body) previousFocus.focus();
+        else triggerRef.current?.focus();
+      }, 0);
     };
   }, [triggerRef]);
   useEffect(() => {

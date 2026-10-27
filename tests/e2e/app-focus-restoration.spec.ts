@@ -83,6 +83,89 @@ test.describe('palette focus restoration', () => {
   });
 });
 
+test.describe('palette open with a scrolled Markdown preview', () => {
+  const previewPath = '/tmp/focus-preview.md';
+  const longMarkdown = Array.from({ length: 160 }, (_, index) => (
+    `## Section ${index + 1}\n\nParagraph ${index + 1} keeps the preview taller than the viewport.`
+  )).join('\n\n');
+
+  interface ScrolledSurfaces {
+    editorScrollTop: number;
+    previewScrollTop: number;
+  }
+
+  async function openScrolledPreview(page: Page): Promise<ScrolledSurfaces> {
+    await openApp(page, {
+      vim: true,
+      openQueue: [previewPath],
+      files: { [previewPath]: longMarkdown },
+    });
+    await openFileViaShortcut(page, previewPath);
+    await expect(page.locator('.cm-content')).toBeFocused();
+
+    await page.getByRole('button', { name: 'Preview', exact: true }).click();
+    await expect(page.locator('.markdown-preview-scroll .markdown-body')).toBeVisible();
+
+    // Put the caret mid-document, then scroll to the bottom. Refocusing the
+    // editor with the caret off-screen is what pulls the view back up.
+    await page.locator('.cm-scroller').evaluate(element => { element.scrollTop = (element.scrollHeight - element.clientHeight) / 2; });
+    await page.waitForTimeout(50);
+    const editorBox = await page.locator('.editor-pane').first().boundingBox();
+    await page.mouse.click(editorBox!.x + editorBox!.width / 2, editorBox!.y + 80);
+    await expect(page.locator('.cm-content')).toBeFocused();
+
+    await page.locator('.cm-scroller').evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await expect.poll(() => page.locator('.markdown-preview-scroll').evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+    await page.waitForTimeout(100);
+
+    return {
+      editorScrollTop: await page.locator('.cm-scroller').evaluate(element => element.scrollTop),
+      previewScrollTop: await page.locator('.markdown-preview-scroll').evaluate(element => element.scrollTop),
+    };
+  }
+
+  async function recordFocusTrace(page: Page): Promise<void> {
+    await page.evaluate(() => {
+      const trace: string[] = [];
+      (window as unknown as Record<string, unknown>).__paletteFocusTrace = trace;
+      document.addEventListener('focusin', event => {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest('.cm-content')) trace.push('editor');
+        else if (target?.closest('.command-palette')) trace.push('palette');
+        else trace.push(target?.tagName.toLowerCase() ?? 'unknown');
+      }, true);
+    });
+  }
+
+  async function paletteFocusTrace(page: Page): Promise<string[]> {
+    return page.evaluate(() => (window as unknown as Record<string, string[]>).__paletteFocusTrace);
+  }
+
+  for (const { shortcut, inputLabel } of [
+    { shortcut: 'Control+p', inputLabel: 'Search files' },
+    { shortcut: 'Control+Shift+p', inputLabel: 'Search commands' },
+  ]) {
+    test(`${shortcut} opens the palette without focusing the editor or resetting either scroll position`, async ({ page }) => {
+      const initial = await openScrolledPreview(page);
+      expect(initial.editorScrollTop).toBeGreaterThan(0);
+      expect(initial.previewScrollTop).toBeGreaterThan(0);
+
+      await recordFocusTrace(page);
+      await page.keyboard.press(shortcut);
+      await expect(page.getByRole('combobox', { name: inputLabel })).toBeFocused();
+      await page.waitForTimeout(150);
+
+      // StrictMode replays the palette's mount effect in development. Its
+      // synthetic cleanup must not hand focus back to the invoking editor.
+      expect(await paletteFocusTrace(page)).not.toContain('editor');
+      await expect(page.locator('.cm-content')).not.toBeFocused();
+
+      expect(await page.locator('.cm-scroller').evaluate(element => element.scrollTop)).toBe(initial.editorScrollTop);
+      expect(await page.locator('.markdown-preview-scroll').evaluate(element => element.scrollTop)).toBe(initial.previewScrollTop);
+    });
+  }
+});
+
 test.describe('palette direction handoffs', () => {
   test('Ctrl+P and the palette Search Files command use the shared palette surface', async ({ page }) => {
     await openApp(page, { vim: true });
