@@ -90,7 +90,7 @@ export default function WelcomeScreen({
                 <KeyboardIcon /><span>Command palette</span><kbd>{shortcutLabel('Shift+P')}</kbd>
               </button>
               <button className="welcome-action-btn" onClick={onOpenSearch}>
-                <SearchIcon /><span>Find in files</span><kbd>{shortcutLabel('Shift+F')}</kbd>
+                <SearchIcon /><span>Find in files</span><kbd>Ctrl+Shift+F</kbd>
               </button>
               <button className="welcome-action-btn" onClick={onOpenSettings}>
                 <SettingsIcon /><span>Editor settings</span><kbd>{shortcutLabel(',')}</kbd>

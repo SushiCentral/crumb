@@ -110,7 +110,7 @@ test('terminal focus keeps global Ctrl-Shift-P and Ctrl-S shortcuts', async ({ p
   await expect(page.locator('.command-palette')).toBeVisible();
 });
 
-test.describe('Vim prompt focus owns Ctrl-W', () => {
+test.describe('Vim prompt focus owns Ctrl-W and Ctrl-B', () => {
   test('Ctrl-W in the command prompt does not close the tab', async ({ page }) => {
     await openApp(page, { vim: true });
     await newFile(page);
@@ -153,6 +153,30 @@ test.describe('Vim prompt focus owns Ctrl-W', () => {
     await expect(prompt).toBeFocused();
     await expect.poll(() => page.evaluate(() => (window as unknown as Record<string, unknown>).__promptKey)).toMatchObject({
       key: 'w',
+      defaultPrevented: false,
+    });
+
+    await page.keyboard.press('Escape');
+  });
+
+  test('Ctrl-B in the command prompt stays in the prompt and does not toggle the sidebar', async ({ page }) => {
+    await openApp(page, { vim: true });
+    await newFile(page);
+    await focusEditor(page);
+
+    await page.keyboard.type(':write foo');
+    const prompt = page.locator('.cm-vim-panel input');
+    await expect(prompt).toBeVisible();
+    await expect(prompt).toBeFocused();
+    await recordPromptKeydown(page);
+
+    await page.keyboard.press('Control+b');
+
+    await expect(page.getByRole('button', { name: 'Toggle file explorer' })).toHaveClass(/active/);
+    await expect(prompt).toBeVisible();
+    await expect(prompt).toBeFocused();
+    await expect.poll(() => page.evaluate(() => (window as unknown as Record<string, unknown>).__promptKey)).toMatchObject({
+      key: 'b',
       defaultPrevented: false,
     });
 
@@ -324,6 +348,26 @@ test('a focused Vim editor keeps Ctrl-W/O out of App actions and Ctrl-N creates 
 
   await page.keyboard.press('Control+n');
   await expect(page.locator('.editor-tab')).toHaveCount(2);
+  await expect(page.locator('.vim-status')).toHaveAttribute('aria-label', 'Vim mode: normal');
+});
+
+test('Ctrl-B in a focused Vim editor toggles the sidebar instead of paging back', async ({ page }) => {
+  await openApp(page, { vim: true });
+  await newFile(page);
+  await focusEditor(page);
+  const explorer = page.getByRole('button', { name: 'Toggle file explorer' });
+  await expect(explorer).toHaveClass(/active/);
+
+  await page.keyboard.press('Control+b');
+
+  await expect(page.locator('.resize-handle.vertical')).toHaveCount(0);
+  await expect(explorer).not.toHaveClass(/active/);
+  await expect(page.locator('.cm-content')).toBeFocused();
+
+  await page.keyboard.press('Control+b');
+
+  await expect(page.locator('.resize-handle.vertical')).toBeVisible();
+  await expect(explorer).toHaveClass(/active/);
   await expect(page.locator('.vim-status')).toHaveAttribute('aria-label', 'Vim mode: normal');
 });
 

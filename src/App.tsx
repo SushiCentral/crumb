@@ -65,11 +65,14 @@ function focusedSurfaceFor(element: Element | null, flags: FocusedSurfaceFlags):
  * App would otherwise interpret as document commands. When focus belongs to a
  * terminal or a Vim prompt input, these keys belong to that input instead.
  * Keep this set aligned with VIM_BUILTIN_CTRL_KEYS in lib/vim/shortcuts.ts.
+ * Ctrl-B is deliberately absent: Crumb reserves it for the sidebar visibility
+ * toggle in editors and the Search query. Ordinary inputs and terminals fall
+ * through to the toggle gate and keep Ctrl-B when it is not allowed.
  * Ctrl-H/J/K/L are handled separately: they are reserved in editors and never
  * claimed by App, so terminals and native inputs receive them unchanged.
  */
 const INPUT_OWNED_VIM_CTRL_KEYS: ReadonlySet<string> = new Set([
-  'w', 'o', 'b', 'n', 'p',
+  'w', 'o', 'n', 'p',
 ]);
 
 function isInputOwnedVimCtrlKey(event: KeyboardEvent): boolean {
@@ -194,6 +197,8 @@ export default function App() {
   const activeTabIdRef = useRef(activeTabId);
   const panesRef = useRef(panes);
   const activePaneIdRef = useRef(activePaneId);
+  const isSidebarOpenRef = useRef(isSidebarOpen);
+  const sidebarTabRef = useRef(sidebarTab);
   const editorRefs = useRef(new Map<string, EditorHandle>());
   const workspaceRef = useRef<HTMLDivElement>(null);
   const sidebarContainerRef = useRef<HTMLDivElement>(null);
@@ -225,6 +230,8 @@ export default function App() {
   activeTabIdRef.current = activeTabId;
   panesRef.current = panes;
   activePaneIdRef.current = activePaneId;
+  isSidebarOpenRef.current = isSidebarOpen;
+  sidebarTabRef.current = sidebarTab;
 
   const activeTab = tabs.find(tab => tab.id === activeTabId);
   const activeLineEnding = useMemo(() => activeTab ? lineEnding(activeTab.content) : '—', [activeTab?.content]);
@@ -454,6 +461,20 @@ export default function App() {
     return panesRef.current.find(pane => pane.kind === 'editor')?.id ?? null;
   };
 
+  /**
+   * Return to the active editor after a sidebar action. Unlike the palette
+   * invoker path this resolves the current editor pane directly, so it remains
+   * reliable when focus already moved back to the editor (or came from a
+   * sidebar control) while a sidebar tab is still open.
+   */
+  const focusActiveEditorFromSidebar = () => {
+    const paneId = focusedEditorPaneId();
+    if (!paneId) return;
+    // The current epoch marks this as an explicit intent, so a focused sidebar
+    // control does not cancel the handoff before the editor view is ready.
+    requestEditorFocus({ paneId }, userInteractionEpochRef.current);
+  };
+
   const rememberFocusInvoker = (): string | null => {
     focusInvokerPaneRef.current = focusedEditorPaneId();
     return focusInvokerPaneRef.current;
@@ -507,6 +528,68 @@ export default function App() {
       if (active instanceof HTMLElement && active.closest('.settings-overlay')) return;
       input.focus();
     });
+  };
+
+  const showExplorerSidebar = () => {
+    isSidebarOpenRef.current = true;
+    sidebarTabRef.current = 'explorer';
+    setIsSidebarOpen(true);
+    setSidebarTab('explorer');
+  };
+
+  const showSearchSidebar = () => {
+    isSidebarOpenRef.current = true;
+    sidebarTabRef.current = 'search';
+    setIsSidebarOpen(true);
+    setSidebarTab('search');
+    focusSearchInput();
+  };
+
+  // Ctrl+Shift+E mirrors the activity bar: reveal Explorer, select it when a
+  // different sidebar tab is showing, or close the sidebar when it already is.
+  const toggleExplorerSidebar = () => {
+    if (!isSidebarOpenRef.current) {
+      showExplorerSidebar();
+      return;
+    }
+    if (sidebarTabRef.current === 'explorer') {
+      isSidebarOpenRef.current = false;
+      setIsSidebarOpen(false);
+      focusActiveEditorFromSidebar();
+      return;
+    }
+    showExplorerSidebar();
+  };
+
+  // Ctrl+Shift+F toggles Search. Selecting Search always focuses its query;
+  // closing it returns to the editor without relying on focus already sitting
+  // in the editor (Search may remain the active tab after Escape).
+  const toggleSearchSidebar = () => {
+    if (!isSidebarOpenRef.current) {
+      showSearchSidebar();
+      return;
+    }
+    if (sidebarTabRef.current === 'search') {
+      isSidebarOpenRef.current = false;
+      setIsSidebarOpen(false);
+      focusActiveEditorFromSidebar();
+      return;
+    }
+    showSearchSidebar();
+  };
+
+  // Ctrl+B hides or shows the sidebar without changing the active tab. When it
+  // closes the sidebar from Search, return focus to the editor instead of
+  // leaving focus on a detached input.
+  const toggleSidebarVisibility = () => {
+    if (isSidebarOpenRef.current) {
+      isSidebarOpenRef.current = false;
+      setIsSidebarOpen(false);
+      focusActiveEditorFromSidebar();
+      return;
+    }
+    isSidebarOpenRef.current = true;
+    setIsSidebarOpen(true);
   };
 
   const dismissQuickOpen = (reason: QuickOpenDismissReason) => {
@@ -1016,14 +1099,6 @@ export default function App() {
         }
         return;
       }
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "f") {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsSidebarOpen(true);
-        setSidebarTab('search');
-        focusSearchInput();
-        return;
-      }
       if ((e.metaKey || e.ctrlKey) && e.key === ',') {
         e.preventDefault();
         e.stopPropagation();
@@ -1036,6 +1111,31 @@ export default function App() {
         return;
       }
       if (isSettingsOpen) return;
+
+      // Sidebar chords are Ctrl-only on every platform. They stay available to
+      // focused Vim editors (Normal or Insert) and the Search query; other
+      // typing inputs and terminals keep their own key handling. Neither chord
+      // is a Vim-owned Ctrl binding, so App receives it before the editor does.
+      const isSearchInput = focusedElement instanceof Element && focusedElement.closest('.search-input') != null;
+      const sidebarShortcutAllowed = !isPaletteOpen
+        && focusedSurface !== 'terminal'
+        && (focusedSurface !== 'input' || isSearchInput);
+      if (sidebarShortcutAllowed
+        && e.ctrlKey && !e.metaKey && !e.altKey && e.shiftKey) {
+        const key = e.key.toLowerCase();
+        if (key === 'e') {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleExplorerSidebar();
+          return;
+        }
+        if (key === 'f') {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleSearchSidebar();
+          return;
+        }
+      }
 
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
@@ -1088,9 +1188,17 @@ export default function App() {
         return;
       }
 
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
+      // Ctrl+B is an exact unshifted Ctrl chord that toggles whichever sidebar
+      // tab is active. It supersedes Vim's Ctrl-B page-back in editors and stays
+      // available from the Search query, but terminals, ordinary inputs, and
+      // Ctrl+Shift+B keep their own behavior. Cmd+B keeps the existing toggle.
+      const key = e.key.toLowerCase();
+      const isCtrlB = e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && key === 'b';
+      const isCmdB = e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && key === 'b';
+      if ((isCtrlB || isCmdB) && (isCmdB || sidebarShortcutAllowed)) {
         e.preventDefault();
-        setIsSidebarOpen((prev) => !prev);
+        e.stopPropagation();
+        toggleSidebarVisibility();
         return;
       }
 
@@ -1109,7 +1217,7 @@ export default function App() {
     { id: 'settings', label: 'Preferences: Open Settings', shortcut: shortcutLabel(','), run: () => openSettings(true) },
     { id: 'theme', label: 'Preferences: Color Theme', detail: theme.name, run: () => {} },
     { id: 'code-font', label: 'Preferences: Editor Font', detail: `${codeFont} · ${fontSize}px`, run: () => {} },
-    { id: 'search-files', label: 'View: Find in Files (Search)', shortcut: shortcutLabel('Shift+F'), run: () => { setIsSidebarOpen(true); setSidebarTab('search'); focusSearchInput(); } },
+    { id: 'search-files', label: 'View: Find in Files (Search)', shortcut: 'Ctrl+Shift+F', run: () => { setIsSidebarOpen(true); setSidebarTab('search'); focusSearchInput(); } },
     { id: 'terminal', label: isPanelOpen ? 'View: Hide Terminal' : 'View: Show Terminal', shortcut: 'Ctrl+`', run: () => { setIsPanelOpen(value => !value); restoreInvokerFocus(); } },
     { id: 'explorer', label: isSidebarOpen ? 'View: Hide File Tree' : 'View: Show File Tree', shortcut: shortcutLabel('B'), run: () => { setIsSidebarOpen(value => !value); restoreInvokerFocus(); } },
     { id: 'word-wrap', label: wordWrap ? 'Editor: Disable Word Wrap' : 'Editor: Enable Word Wrap', detail: wordWrap ? 'Wrapping is on' : 'Wrapping is off', run: () => { setWordWrap(value => !value); restoreInvokerFocus(); } },
@@ -1173,7 +1281,7 @@ export default function App() {
                 setSidebarTab('explorer');
               }
             }}
-            title={`Explorer (${shortcutLabel('B')})`}
+            title={`Explorer (Ctrl+Shift+E)`}
             aria-label="Toggle file explorer"
             className={`activity-btn ${isSidebarOpen && sidebarTab === 'explorer' ? 'active' : ''}`}
           >
@@ -1192,7 +1300,7 @@ export default function App() {
                 setSidebarTab('search');
               }
             }}
-            title={`Search in files (${shortcutLabel('Shift+F')})`}
+            title={`Search in files (Ctrl+Shift+F)`}
             aria-label="Toggle search in files"
             className={`activity-btn ${isSidebarOpen && sidebarTab === 'search' ? 'active' : ''}`}
           >
@@ -1225,6 +1333,7 @@ export default function App() {
         {/* Sidebar Container */}
         <div
           ref={sidebarContainerRef}
+          hidden={!isSidebarOpen}
           style={{
             width: isSidebarOpen ? `${sidebarWidth}px` : "0px",
             minWidth: isSidebarOpen ? `${sidebarWidth}px` : "0px",
@@ -1250,6 +1359,7 @@ export default function App() {
             <SearchPanel
               rootPath={explorerRootPath}
               onOpenFile={(path, line) => { void handleOpenFile(path, false, line); }}
+              onExitToEditor={focusActiveEditorFromSidebar}
               onClose={() => setIsSidebarOpen(false)}
             />
           )}

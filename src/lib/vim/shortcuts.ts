@@ -32,6 +32,8 @@ export interface VimShortcutInput {
 /**
  * Ctrl bindings Crumb currently conflicts with and that the Vim engine handles
  * (or deliberately does nothing with, as with Ctrl-W in Normal mode).
+ * Ctrl+B is intentionally absent: Crumb reserves the exact unshifted chord for
+ * the sidebar visibility toggle, superseding Vim's page-back.
  * Ctrl+H/J/K/L are reserved editor keys handled by the editor's own swallow
  * keymap; Ctrl+S, palette shortcuts, terminal shortcuts, and tab switching stay
  * outside this set so the application keeps owning them.
@@ -39,7 +41,6 @@ export interface VimShortcutInput {
 const VIM_BUILTIN_CTRL_KEYS: ReadonlySet<string> = new Set([
   'w', // Vim window prefix; must never close a Crumb tab
   'o', // jump list backward
-  'b', // page backward
 ]);
 
 const INSERT_LIKE_MODES: ReadonlySet<VimPublicMode> = new Set<VimPublicMode>([

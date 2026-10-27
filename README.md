@@ -61,7 +61,9 @@ npm run tauri:dev
 - `Ctrl/Cmd + N` — New untitled tab
 - `Ctrl/Cmd + W` — Close the current tab (prompts for unsaved changes)
 - `Ctrl/Cmd + Tab` — Switch tabs (`Shift` goes backward)
-- `Ctrl/Cmd + B` — Toggle file explorer sidebar
+- `Ctrl/Cmd + B` — Toggle sidebar visibility without changing the active Explorer or Search tab. `Ctrl + B` also works from the Search query and a focused Vim editor, where it takes precedence over Vim's Ctrl-B page-back; `Ctrl + Shift + B` is not a sidebar shortcut.
+- `Ctrl + Shift + E` — Show the Explorer, or hide the sidebar when Explorer is already active. When Search is the active sidebar tab, this switches to Explorer instead of closing. This works from a focused Vim editor (Normal or Insert) and from the Search query input.
+- `Ctrl + Shift + F` — Toggle Search in Files and focus the query. Pressing it while Search is active closes the sidebar and returns focus to the editor. These sidebar chords are `Ctrl`-only and do not use `Meta`/`Super` or `Alt`; plain `Ctrl + E` is not a Crumb shortcut.
 - `Ctrl + \`` — Toggle the bottom panel; opening selects Terminal and focuses its input, closing returns to the editor
 - `Ctrl/Cmd + Shift + P` — Open the command palette
 

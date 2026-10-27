@@ -24,9 +24,13 @@ function shortcut(overrides: Partial<VimShortcutInput> = {}): boolean {
 }
 
 test('Vim owns conflicting Ctrl bindings only while enabled in a focused editor', () => {
-  for (const key of ['w', 'o', 'b']) {
+  for (const key of ['w', 'o']) {
     assert.equal(shortcut({ key }), true, `Ctrl-${key} should belong to Vim`);
   }
+
+  // Crumb reserves Ctrl-B for the sidebar toggle so it must never reach Vim's
+  // page-back command, even in a focused Normal-mode editor.
+  assert.equal(shortcut({ key: 'b' }), false, 'Ctrl-B belongs to the Crumb sidebar toggle');
 
   assert.equal(shortcut({ enabled: false }), false);
   assert.equal(shortcut({ enabled: true, focusedSurface: 'editor' }), true);
@@ -51,7 +55,7 @@ test('Vim owns the Ctrl conflicts in Normal, Insert, Replace, and Visual modes',
 });
 
 test('unsupported or modified Ctrl combinations remain application shortcuts', () => {
-  for (const key of ['s', 'f', 'c', 'x', 'n', 'p', 'h', 'j', 'k', 'l', 'Tab', ',', '`']) {
+  for (const key of ['s', 'f', 'c', 'x', 'b', 'n', 'p', 'h', 'j', 'k', 'l', 'Tab', ',', '`']) {
     assert.equal(shortcut({ key }), false, `Ctrl-${key} is not a supported Vim conflict`);
   }
 

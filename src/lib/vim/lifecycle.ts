@@ -244,7 +244,8 @@ const GOAL_PRESERVING_MOTIONS = new Set([
 
 // Only line jumps (and `j`/`k`, whose package path can discard the goal after
 // a short-line jump) get an explicit cursor correction. `gj`, Ctrl-D, Ctrl-F,
-// and Ctrl-B retain their native wrapped-line/scroll semantics.
+// and Ctrl-B retain their native wrapped-line/scroll semantics when they reach
+// the engine; Crumb's App reserves the exact Ctrl-B chord in editors.
 const GOAL_CORRECTION_MOTIONS = new Set([
   ...STARTOFLINE_MOTIONS,
   'moveByLines',
