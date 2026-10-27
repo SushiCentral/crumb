@@ -5,6 +5,7 @@ import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirro
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
 import { closeBrackets, autocompletion, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
 import { lintKeymap } from '@codemirror/lint';
+import { indentGuides } from './indent-guides.ts';
 import type { EditorPreferences } from './preferences.ts';
 
 // The invariant parts of basicSetup stay outside the preferences compartment:
@@ -47,6 +48,7 @@ export function editorPreferenceExtensions(preferences: EditorPreferences): Exte
     preferences.bracketMatching ? bracketMatching() : [],
     preferences.autoCloseBrackets ? [closeBrackets(), Prec.high(keymap.of(closeBracketsKeymap))] : [],
     preferences.highlightActiveLine ? highlightActiveLine() : [],
+    preferences.indentGuides ? indentGuides() : [],
     indentUnit.of(preferences.indentWith === 'tabs' ? '\t' : ' '.repeat(preferences.indentSize)),
     EditorState.tabSize.of(preferences.indentSize),
   ];

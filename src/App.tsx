@@ -1248,8 +1248,14 @@ export default function App() {
         }
       }
 
+      const isExactCtrlP = e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'p';
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
+        // While the file picker is already open, an exact Ctrl+P belongs to
+        // Quick Open as its cycle key. Let it reach the field instead of
+        // reopening the palette and resetting focus, query, or selection.
+        // Cmd+P keeps the existing open/reset behavior on macOS.
+        if (isExactCtrlP && isPaletteOpen && paletteMode === 'files') return;
         e.stopPropagation();
         openQuickOpen();
         return;
@@ -1322,7 +1328,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [editorPreferences.vimModeEnabled, isPaletteOpen, isSettingsOpen, isPanelOpen, currentPendingCloseId, isCloseAllConfirmationOpen]);
+  }, [editorPreferences.vimModeEnabled, isPaletteOpen, paletteMode, isSettingsOpen, isPanelOpen, currentPendingCloseId, isCloseAllConfirmationOpen]);
 
   const commands: PaletteCommand[] = [
     { id: 'settings', label: 'Preferences: Open Settings', shortcut: shortcutLabel(','), run: () => openSettings(true) },

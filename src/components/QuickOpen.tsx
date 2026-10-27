@@ -29,8 +29,15 @@ const QuickOpen = forwardRef<QuickOpenHandle, Props>(function QuickOpen({ rootPa
   const [loading, setLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const openRef = useRef(open);
+  const matchesRef = useRef<string[]>([]);
+  const selectedRef = useRef(selected);
+  /** Set only by an extra Ctrl+P press, never by the press that opens the field. */
+  const ctrlCycleArmedRef = useRef(false);
+  const chooseRef = useRef<(path: string) => void>(() => {});
 
-  useImperativeHandle(ref, () => ({ focus: () => { setIndexedRoot(null); setQuery(''); inputRef.current?.focus(); setOpen(true); } }), []);
+  useImperativeHandle(ref, () => ({ focus: () => { ctrlCycleArmedRef.current = false; setIndexedRoot(null); setQuery(''); inputRef.current?.focus(); setOpen(true); } }), []);
 
   useEffect(() => {
     if (!open || !rootPath || indexedRoot === rootPath) return;
@@ -66,6 +73,7 @@ const QuickOpen = forwardRef<QuickOpenHandle, Props>(function QuickOpen({ rootPa
       if (containerRef.current?.contains(event.target as Node)) return;
       // An outside click belongs to the clicked control; release focus rather
       // than pulling it back to the editor when the field hides.
+      ctrlCycleArmedRef.current = false;
       setOpen(false);
       inputRef.current?.blur();
       onDismiss?.('outside');
@@ -83,25 +91,82 @@ const QuickOpen = forwardRef<QuickOpenHandle, Props>(function QuickOpen({ rootPa
       .slice(0, 12);
   }, [query, openPaths, indexed, indexedRoot, rootPath]);
 
+  matchesRef.current = matches;
+  selectedRef.current = selected;
+  openRef.current = open;
+
+  useEffect(() => {
+    // Ctrl+P cycles files only while this field still owns focus. A window
+    // listener also observes Control release when focus has moved; the checks
+    // below prevent a stale release from opening a file.
+    const disarm = () => { ctrlCycleArmedRef.current = false; };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key !== 'Control' || !ctrlCycleArmedRef.current) return;
+      ctrlCycleArmedRef.current = false;
+      if (!openRef.current) return;
+      const container = containerRef.current;
+      const active = document.activeElement;
+      if (!container || !(active instanceof Node) || !container.contains(active)) return;
+      const list = matchesRef.current;
+      const index = Math.min(Math.max(selectedRef.current, 0), list.length - 1);
+      const path = list[index];
+      if (path) chooseRef.current(path);
+    };
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', disarm);
+    return () => {
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', disarm);
+    };
+  }, []);
+
+  useEffect(() => {
+    listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [selected, matches]);
+
   const choose = (path: string) => {
+    ctrlCycleArmedRef.current = false;
     onOpenFile(path);
     setQuery('');
     setOpen(false);
     inputRef.current?.blur();
   };
+  chooseRef.current = choose;
 
   return <div className={`quick-open${embedded ? ' quick-open-embedded' : ''}`} ref={containerRef} onBlur={event => {
-    if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false);
+    if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) {
+      ctrlCycleArmedRef.current = false;
+      setOpen(false);
+    }
   }}>
     {embedded && <button className="palette-back" onClick={onBack} aria-label="Back to commands">‹</button>}
     {!embedded && <svg className="quick-open-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.5" /><path d="m16 16 5 5" /></svg>}
     <input ref={inputRef} value={query} aria-label="Search files" role="combobox" aria-expanded={embedded || open} aria-controls="quick-open-results"
       placeholder={rootPath ? 'Search files by name' : 'Search open files'}
-      onFocus={() => { onActivate?.(); setIndexedRoot(null); setOpen(true); }}
-      onChange={event => { setQuery(event.target.value); setSelected(0); setOpen(true); }}
+      onFocus={() => { ctrlCycleArmedRef.current = false; onActivate?.(); setIndexedRoot(null); setOpen(true); }}
+      onChange={event => { ctrlCycleArmedRef.current = false; setQuery(event.target.value); setSelected(0); setOpen(true); }}
       onKeyDown={event => {
+        // The press that opens Quick Open is consumed by App, so the first
+        // Ctrl+P seen here is always an extra press: advance one file and arm
+        // release-to-open. OS auto-repeat keeps the event from counting twice.
+        if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'p') {
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.repeat) return;
+          const list = matchesRef.current;
+          if (!list.length) { ctrlCycleArmedRef.current = false; return; }
+          const current = Math.min(Math.max(selectedRef.current, 0), list.length - 1);
+          // The Ctrl+P cycle wraps after the last file; ordinary ArrowDown
+          // remains bounded at the end of the list.
+          const next = current >= list.length - 1 ? 0 : current + 1;
+          selectedRef.current = next;
+          setSelected(next);
+          ctrlCycleArmedRef.current = true;
+          return;
+        }
         if (event.key === 'Escape') {
           event.preventDefault();
+          ctrlCycleArmedRef.current = false;
           setOpen(false);
           if (embedded) onBack?.();
           else { inputRef.current?.blur(); onDismiss?.('cancel'); }
@@ -111,7 +176,7 @@ const QuickOpen = forwardRef<QuickOpenHandle, Props>(function QuickOpen({ rootPa
         if (event.key === 'Enter' && matches[selected]) { event.preventDefault(); choose(matches[selected]); }
       }} />
     {!embedded && <kbd>{shortcutLabel('P')}</kbd>}
-    {(embedded || open) && <div className="quick-open-results" id="quick-open-results" role="listbox" aria-label="Matching files">
+    {(embedded || open) && <div ref={listRef} className="quick-open-results" id="quick-open-results" role="listbox" aria-label="Matching files">
       {loading && <div className="quick-open-hint">Finding files in this folder…</div>}
       {!loading && matches.length === 0 && <div className="quick-open-hint">{query ? 'No matching files' : 'Type to search files'}</div>}
       {matches.map((path, index) => <button key={path} className={`quick-open-result ${index === selected ? 'selected' : ''}`}

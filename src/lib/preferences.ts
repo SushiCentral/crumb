@@ -14,6 +14,7 @@ export interface EditorPreferences {
   bracketMatching: boolean;
   autoCloseBrackets: boolean;
   highlightActiveLine: boolean;
+  indentGuides: boolean;
   indentSize: 2 | 3 | 4;
   indentWith: 'spaces' | 'tabs';
   vimModeEnabled: boolean;
@@ -21,7 +22,7 @@ export interface EditorPreferences {
 
 export const defaultEditorPreferences: EditorPreferences = {
   lineNumbers: true, bracketMatching: true, autoCloseBrackets: true,
-  highlightActiveLine: true, indentSize: 2, indentWith: 'spaces',
+  highlightActiveLine: true, indentGuides: true, indentSize: 2, indentWith: 'spaces',
   vimModeEnabled: false,
 };
 
@@ -32,6 +33,7 @@ export function readEditorPreferences(read: (key: string) => string | null): Edi
     bracketMatching: readBoolean(read('crumb.bracketMatching'), true),
     autoCloseBrackets: readBoolean(read('crumb.autoCloseBrackets'), true),
     highlightActiveLine: readBoolean(read('crumb.highlightActiveLine'), true),
+    indentGuides: readBoolean(read('crumb.indentGuides'), true),
     indentSize: size === 2 || size === 3 || size === 4 ? size : 2,
     indentWith: read('crumb.indentWith') === 'tabs' ? 'tabs' : 'spaces',
     vimModeEnabled: readBoolean(read('crumb.vimModeEnabled'), false),

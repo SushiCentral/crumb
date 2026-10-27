@@ -77,6 +77,13 @@ function editorAppearance(theme: Theme, fontSize: number, fontFamily: string) {
     },
     '.cm-content': { padding: '10px 0' },
     '.cm-line': { padding: '0 16px' },
+    '.cm-line.cm-indent-guide-line': {
+      '--cm-indent-guide-color': 'color-mix(in srgb, var(--text) 18%, var(--editor))',
+      backgroundImage: 'repeating-linear-gradient(to right, var(--cm-indent-guide-color) 0 1px, transparent 1px var(--cm-indent-step))',
+      backgroundRepeat: 'no-repeat',
+      backgroundSize: 'calc(var(--cm-indent-count) * var(--cm-indent-step)) 100%',
+      backgroundOrigin: 'content-box',
+    },
     '.cm-scroller': { overflow: 'auto', fontFamily: 'inherit' },
     '.cm-gutters': {
       backgroundColor: 'var(--editor)', borderRight: '1px solid var(--border)',

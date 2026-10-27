@@ -7,6 +7,7 @@ Crumb is a cross-platform code editor inspired by VS Code. It features a code ed
 ## Features
 
 - **Code editor** powered by CodeMirror 6 with syntax highlighting selected from the file name
+- **Indentation guides** — subtle vertical lines that respect indentation width and tabs, including through blank lines. Enabled by default; toggle them in Settings → Editor.
 - **File explorer** sidebar with recursive folder browsing
 - **Integrated terminal** panel with support for multiple terminals and split views; new terminals start in the Explorer folder
 - **Resizable panels** — drag the sidebar and bottom panel edges, or toggle them independently
@@ -56,7 +57,7 @@ npm run tauri:dev
 - `Ctrl/Cmd + 0` — Reset interface zoom to 100%
 - `Ctrl/Cmd + Shift + 0` — Reset editor and terminal font size to 13px
 - `Ctrl/Cmd + O` — Open a file
-- `Ctrl/Cmd + P` — Search filenames in the open folder and open tabs
+- `Ctrl/Cmd + P` — Search filenames in the open folder and open tabs. On Windows/Linux, keep holding `Ctrl` and press `P` again to move down the results, wrapping from the last file to the first; releasing `Ctrl` after at least one extra press opens the selected file. The press that opens the picker never opens a file on release, and `Cmd + P` on macOS keeps its existing open-only behavior.
 - `Ctrl/Cmd + S` — Save file
 - `Ctrl/Cmd + N` — New untitled tab
 - `Ctrl/Cmd + W` — Close the current tab (prompts for unsaved changes)

@@ -124,6 +124,7 @@ export default function SettingsModal({ themes, currentThemeId, onThemeChange, o
           {([
             ['lineNumbers', 'Line numbers', 'Keep code-folding controls visible when numbers are hidden'],
             ['bracketMatching', 'Bracket matching', 'Highlight the matching bracket near the cursor'],
+            ['indentGuides', 'Indentation guides', 'Show vertical guides at code indentation levels'],
             ['autoCloseBrackets', 'Auto-close brackets', 'Insert closing brackets and quotes as you type'],
             ['highlightActiveLine', 'Highlight active line', 'Highlight the current line and its line number'],
           ] as const).map(([key, label, description]) => <Toggle key={key} id={`editor-${key}`} label={label} description={description} checked={editorPreferences[key]} onChange={checked => onEditorPreferencesChange({ ...editorPreferences, [key]: checked })} />)}
