@@ -81,6 +81,87 @@ test('leader starts only on Space and matches the approved app actions', () => {
   });
 });
 
+test('grouped leader actions resolve with case-sensitive keys', () => {
+  const cases: ReadonlyArray<readonly [string, string, string]> = [
+    ['f', 's', 'save-file'],
+    ['f', 'S', 'save-all'],
+    ['b', 'd', 'close-tab'],
+    ['b', 'D', 'force-close-tab'],
+    ['s', 'w', 'search-word'],
+    ['s', 'h', 'clear-search-highlight'],
+    ['u', 'w', 'toggle-word-wrap'],
+    ['u', 'n', 'toggle-line-numbers'],
+  ];
+
+  for (const [group, key, action] of cases) {
+    assert.deepEqual(
+      matchVimLeaderKey(['Space'], group),
+      { kind: 'pending', keys: ['Space', group] },
+      `Space ${group} should open a group`,
+    );
+    assert.deepEqual(
+      matchVimLeaderKey(['Space', group], key),
+      { kind: 'action', action, keys: ['Space', group, key] },
+      `Space ${group} ${key} should dispatch ${action}`,
+    );
+  }
+
+  // Every group is its own pending prefix; no group is an action by itself.
+  for (const group of ['f', 'b', 's', 'u']) {
+    assert.equal(matchVimLeaderKey(['Space'], group).kind, 'pending');
+  }
+
+  // Case distinguishes actions inside a group instead of aliasing them.
+  assert.deepEqual(matchVimLeaderKey(['Space', 'f'], 's'), {
+    kind: 'action', action: 'save-file', keys: ['Space', 'f', 's'],
+  });
+  assert.deepEqual(matchVimLeaderKey(['Space', 'f'], 'S'), {
+    kind: 'action', action: 'save-all', keys: ['Space', 'f', 'S'],
+  });
+  assert.deepEqual(matchVimLeaderKey(['Space', 'b'], 'd'), {
+    kind: 'action', action: 'close-tab', keys: ['Space', 'b', 'd'],
+  });
+  assert.deepEqual(matchVimLeaderKey(['Space', 'b'], 'D'), {
+    kind: 'action', action: 'force-close-tab', keys: ['Space', 'b', 'D'],
+  });
+  assert.deepEqual(matchVimLeaderKey(['Space', 's'], 'w'), {
+    kind: 'action', action: 'search-word', keys: ['Space', 's', 'w'],
+  });
+  assert.deepEqual(matchVimLeaderKey(['Space', 's'], 'h'), {
+    kind: 'action', action: 'clear-search-highlight', keys: ['Space', 's', 'h'],
+  });
+  assert.deepEqual(matchVimLeaderKey(['Space', 'u'], 'w'), {
+    kind: 'action', action: 'toggle-word-wrap', keys: ['Space', 'u', 'w'],
+  });
+  assert.deepEqual(matchVimLeaderKey(['Space', 'u'], 'n'), {
+    kind: 'action', action: 'toggle-line-numbers', keys: ['Space', 'u', 'n'],
+  });
+
+  // Existing leader actions remain available alongside the groups.
+  assert.deepEqual(matchVimLeaderKey(['Space'], 'Space'), {
+    kind: 'action', action: 'command-palette', keys: ['Space', 'Space'],
+  });
+  assert.deepEqual(matchVimLeaderKey(['Space'], 'e'), {
+    kind: 'action', action: 'toggle-file-tree', keys: ['Space', 'e'],
+  });
+  assert.deepEqual(matchVimLeaderKey(['Space'], 'E'), {
+    kind: 'action', action: 'toggle-file-tree', keys: ['Space', 'E'],
+  });
+  assert.deepEqual(matchVimLeaderKey(['Space'], '/'), {
+    kind: 'action', action: 'search', keys: ['Space', '/'],
+  });
+  assert.deepEqual(matchVimLeaderKey(['Space', 'f'], 'f'), {
+    kind: 'action', action: 'quick-open', keys: ['Space', 'f', 'f'],
+  });
+});
+
+test('new leader groups consume unknown and wrong-case keys', () => {
+  assert.deepEqual(matchVimLeaderKey(['Space', 'b'], 'x'), { kind: 'cancelled', keys: [] });
+  assert.deepEqual(matchVimLeaderKey(['Space', 's'], 'W'), { kind: 'cancelled', keys: [] });
+  assert.deepEqual(matchVimLeaderKey(['Space', 'u'], 'N'), { kind: 'cancelled', keys: [] });
+  assert.deepEqual(matchVimLeaderKey(['Space', 'f'], 'd'), { kind: 'cancelled', keys: [] });
+});
+
 test('non-matching leader keys cancel instead of falling through to Vim', () => {
   // Space currently moves right; the leader owns the remainder of an
   // incomplete sequence so `Space x` cannot become a motion plus an edit.
@@ -243,11 +324,11 @@ test('the default leader timeout is 10000ms', () => {
   assert.equal(VIM_LEADER_TIMEOUT_MS, 10000);
 });
 
-test('the default guide delay is 500ms', () => {
-  assert.equal(VIM_LEADER_GUIDE_DELAY_MS, 500);
+test('the default guide delay is 200ms', () => {
+  assert.equal(VIM_LEADER_GUIDE_DELAY_MS, 200);
 });
 
-test('the guide reveals after exactly 500ms only while the initial prefix is still incomplete', () => {
+test('the guide reveals after exactly 200ms only while the initial prefix is still incomplete', () => {
   const timers = fakeTimers();
   const guides: Array<readonly string[] | null> = [];
   const controller = createVimLeaderController({
@@ -258,7 +339,7 @@ test('the guide reveals after exactly 500ms only while the initial prefix is sti
   });
 
   assert.equal(controller.handleKey('Space'), true);
-  timers.advance(499);
+  timers.advance(199);
   assert.deepEqual(guides, []);
   assert.equal(controller.guidePrefix, null);
 
@@ -286,9 +367,9 @@ test('a complete sequence before the reveal delay never shows the guide', () => 
     clearTimeout: timers.clearTimeout,
   });
 
-  // Completing just before the 500ms boundary must still suppress the guide.
+  // Completing just before the 200ms boundary must still suppress the guide.
   assert.equal(controller.handleKey('Space'), true);
-  timers.advance(499);
+  timers.advance(199);
   assert.equal(controller.handleKey('Space'), true);
   assert.deepEqual(actions, ['command-palette']);
   assert.deepEqual(guides, []);
@@ -315,13 +396,13 @@ test('later prefix keys never restart the guide reveal delay', () => {
   });
 
   assert.equal(controller.handleKey('Space'), true);
-  timers.advance(400);
+  timers.advance(100);
   assert.equal(controller.handleKey('f'), true);
   timers.advance(99);
   assert.deepEqual(guides, []);
   assert.equal(controller.guidePrefix, null);
 
-  // 500ms after the initial Space, not after the later `f`.
+  // 200ms after the initial Space, not after the later `f`.
   timers.advance(1);
   assert.deepEqual(guides, [['Space', 'f']]);
   assert.deepEqual(controller.guidePrefix, ['Space', 'f']);
@@ -368,7 +449,7 @@ test('the guide hides on complete, invalid, Escape, cancel, and dispose', () => 
   const revealThen = (key: string) => {
     guides.length = 0;
     assert.equal(controller.handleKey('Space'), true);
-    timers.advance(500);
+    timers.advance(200);
     assert.deepEqual(controller.guidePrefix, ['Space']);
     if (key === 'cancel') controller.cancel();
     else if (key === 'dispose') controller.dispose();

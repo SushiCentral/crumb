@@ -378,6 +378,30 @@ test('argumentless :w invokes the save hook and unsupported Ex writes do not', a
   expect((await fixtureState(page)).writes).toEqual(['alpha beta']);
 });
 
+test('Ex quit safety: unsupported forms never reach the host, supported forms do', async ({ page }) => {
+  await openEditor(page, 'alpha beta');
+
+  for (const command of ['1q', 'q other', 'q!!', 'wq!', 'wq other', '1wq']) {
+    await page.keyboard.type(`:${command}`);
+    await page.keyboard.press('Enter');
+  }
+
+  const hostCalls = async () => page.evaluate(() => {
+    const fixtureWindow = window as unknown as {
+      __vimFixture: { getState: () => { hostCalls: string[] } };
+    };
+    return fixtureWindow.__vimFixture.getState().hostCalls;
+  });
+  expect(await hostCalls()).toEqual([]);
+
+  for (const command of ['q', 'q!', 'wq']) {
+    await page.keyboard.type(`:${command}`);
+    await page.keyboard.press('Enter');
+  }
+
+  expect(await hostCalls()).toEqual(['q', 'q!', 'wq']);
+});
+
 test('/word search finds matches and n/N traverse them', async ({ page }) => {
   const editor = await openEditor(page, 'alpha beta gamma beta delta');
   await moveToStart(page);

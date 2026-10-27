@@ -21,6 +21,9 @@ interface SearchPanelProps {
   onOpenFile: (path: string, lineNumber?: number) => void;
   onClose?: () => void;
   onExitToEditor?: () => void;
+  /** Literal query requested by the editor (Vim Space `s w`). */
+  request?: { term: string; id: number } | null;
+  onRequestConsumed?: () => void;
 }
 
 const IGNORED_DIRS = new Set([
@@ -39,7 +42,7 @@ const MAX_TOTAL_MATCHES = 500;
 const MAX_FILES_SCANNED = 2000;
 const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024; // 2MB
 
-export default function SearchPanel({ rootPath, onOpenFile, onClose, onExitToEditor }: SearchPanelProps) {
+export default function SearchPanel({ rootPath, onOpenFile, onClose, onExitToEditor, request, onRequestConsumed }: SearchPanelProps) {
   const [query, setQuery] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [isRegex, setIsRegex] = useState(false);
@@ -64,9 +67,9 @@ export default function SearchPanel({ rootPath, onOpenFile, onClose, onExitToEdi
     setStatusMessage(null);
   }, [rootPath]);
 
-  const buildSearchRegex = (term: string) => {
+  const buildSearchRegex = (term: string, regexEnabled = isRegex) => {
     try {
-      let pattern = isRegex ? term : term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      let pattern = regexEnabled ? term : term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       if (wholeWord) {
         pattern = `\\b${pattern}\\b`;
       }
@@ -82,10 +85,10 @@ export default function SearchPanel({ rootPath, onOpenFile, onClose, onExitToEdi
     setStatusMessage('Search cancelled.');
   };
 
-  const executeSearch = async () => {
+  const executeSearch = async (termOverride?: string, regexEnabled = isRegex) => {
     const runId = ++searchRunRef.current;
     const isCurrent = () => runId === searchRunRef.current;
-    const term = query.trim();
+    const term = (termOverride ?? query).trim();
     if (!term || !rootPath) {
       setResults([]);
       setSearched(false);
@@ -94,7 +97,7 @@ export default function SearchPanel({ rootPath, onOpenFile, onClose, onExitToEdi
       return;
     }
 
-    const regex = buildSearchRegex(term);
+    const regex = buildSearchRegex(term, regexEnabled);
     if (!regex) {
       setIsSearching(false);
       setStatusMessage('Invalid regular expression syntax.');
@@ -215,6 +218,18 @@ export default function SearchPanel({ rootPath, onOpenFile, onClose, onExitToEdi
       if (isCurrent()) setIsSearching(false);
     }
   };
+
+  useEffect(() => {
+    if (!request) return;
+    // Run on every request effect setup, including StrictMode's development
+    // remount. The mount cleanup invalidates any in-flight run, and a consumed
+    // id must not block the re-setup from starting the search again. The word is
+    // searched literally, so an enabled regex mode must not reinterpret it.
+    setIsRegex(false);
+    setQuery(request.term);
+    void executeSearch(request.term, false);
+    onRequestConsumed?.();
+  }, [request]);
 
   const toggleExpand = (filePath: string) => {
     setResults(prev =>

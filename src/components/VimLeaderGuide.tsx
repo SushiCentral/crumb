@@ -11,6 +11,21 @@ const ACTION_LABELS: Record<VimLeaderAction, string> = {
   'toggle-file-tree': 'File tree',
   search: 'Search',
   'quick-open': 'Quick Open',
+  'save-file': 'Save file',
+  'save-all': 'Save all',
+  'close-tab': 'Close tab',
+  'force-close-tab': 'Force close tab',
+  'search-word': 'Search word',
+  'clear-search-highlight': 'Clear search highlight',
+  'toggle-word-wrap': 'Word wrap',
+  'toggle-line-numbers': 'Line numbers',
+};
+
+const GROUP_LABELS: Record<string, string> = {
+  f: 'Files',
+  b: 'Buffers',
+  s: 'Search',
+  u: 'UI',
 };
 
 interface Continuation {
@@ -29,7 +44,11 @@ function getContinuations(prefix: readonly string[]): Continuation[] {
     if (!samePrefix(prefix, binding.keys)) continue;
     const key = binding.keys[prefix.length];
     const hasMore = binding.keys.length > prefix.length + 1;
-    const identity = `${binding.action}:${key.toLowerCase()}:${hasMore}`;
+    // At the root, one row represents an entire group. Inside a group, rows
+    // represent immediate next keys; action identity must not split a branch.
+    const identity = prefix.length === 1
+      ? `group:${key.toLowerCase()}`
+      : `${key}:${hasMore}`;
     const existing = unique.get(identity);
     if (!existing) {
       unique.set(identity, { action: binding.action, key: [key], hasMore });
@@ -51,6 +70,9 @@ export default function VimLeaderGuide({ prefix }: VimLeaderGuideProps) {
 
   const continuations = getContinuations(prefix);
   if (continuations.length === 0) return null;
+  const groupName = prefix.length === 2 && prefix[0] === 'Space'
+    ? GROUP_LABELS[prefix[1].toLowerCase()]
+    : undefined;
 
   return (
     <aside
@@ -67,16 +89,18 @@ export default function VimLeaderGuide({ prefix }: VimLeaderGuideProps) {
         ))}
         <span className="vim-leader-guide-next">NEXT</span>
       </div>
+      {groupName && <div className="vim-leader-guide-group-heading">{groupName}</div>}
       <ul className="vim-leader-guide-list">
         {continuations.map(({ action, key, hasMore }) => (
           <li className={`vim-leader-guide-row${hasMore ? ' has-more' : ''}`} key={`${action}:${key.join('/')}`}>
             <kbd className="vim-leader-guide-key">{key.map(displayKey).join(' / ')}</kbd>
-            {hasMore ? (
-              <span className="vim-leader-guide-branch">
-                <span aria-hidden="true">›</span> More
+            {prefix.length === 1 && GROUP_LABELS[key[0].toLowerCase()] ? (
+              <span className="vim-leader-guide-group-label">
+                {GROUP_LABELS[key[0].toLowerCase()]}
+                <span className="vim-leader-guide-group-badge">GROUP</span>
               </span>
             ) : (
-              <span className="vim-leader-guide-action">{ACTION_LABELS[action]}</span>
+              <span className="vim-leader-guide-action">{ACTION_LABELS[action] ?? action}</span>
             )}
           </li>
         ))}

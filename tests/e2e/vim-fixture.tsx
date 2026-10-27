@@ -12,14 +12,22 @@ if (width) container.style.width = `${width}px`;
 document.getElementById('root')?.append(container);
 
 const writes: string[] = [];
+const hostCalls: string[] = [];
+let view: EditorView;
 const vim = createVimExtension(undefined, {
   onWrite: () => {
     writes.push(view.state.doc.toString());
   },
+  onQuit: force => {
+    hostCalls.push(force ? 'q!' : 'q');
+  },
+  onWriteQuit: () => {
+    hostCalls.push('wq');
+  },
 });
 vim.installMappings();
 
-const view = new EditorView({
+view = new EditorView({
   doc,
   extensions: [
     vim.extension,
@@ -37,6 +45,7 @@ interface FixtureSnapshot {
   mode: string;
   pending: string;
   writes: string[];
+  hostCalls: string[];
   undoDepth: number;
 }
 
@@ -49,6 +58,7 @@ interface FixtureSnapshot {
     mode: vim.getState(view).mode,
     pending: vim.getState(view).pending,
     writes: [...writes],
+    hostCalls: [...hostCalls],
     undoDepth: undoDepth(view.state),
   }),
   getRegister: (name: string) => vim.getRegister(view, name),
@@ -66,5 +76,8 @@ interface FixtureSnapshot {
   nativeScrollRepeat: () => Math.round(view.scrollDOM.clientHeight / (2 * view.defaultLineHeight)),
   clearWrites: () => {
     writes.length = 0;
+  },
+  clearHostCalls: () => {
+    hostCalls.length = 0;
   },
 };

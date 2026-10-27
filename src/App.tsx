@@ -13,7 +13,7 @@ import { shouldVimOwnShortcut, type VimFocusedSurface } from './lib/vim/shortcut
 import { isEditorReservedCtrlKey, type CursorInfo } from './lib/editor-extensions';
 import StatusBar, { type VimStatus } from './components/StatusBar';
 import { parseRecentProjects, recordProject, type RecentProject } from './lib/recent-projects';
-import Editor, { type EditorHandle } from "./components/Editor";
+import Editor, { type EditorHandle, type VimEditorTarget } from "./components/Editor";
 import BottomPanel from "./components/BottomPanel";
 import FileExplorer from "./components/FileExplorer";
 import SearchPanel from "./components/SearchPanel";
@@ -188,6 +188,10 @@ export default function App() {
   const [pendingCloseOperation, setPendingCloseOperation] = useState<PendingCloseOperation | null>(null);
   const currentPendingCloseId = pendingCloseOperation?.dirtyTabIds[pendingCloseOperation.index] ?? null;
 
+  // A Space `s w` request hands a literal query to the Search sidebar. The
+  // monotonically increasing id lets an already-mounted panel consume repeats.
+  const [searchRequest, setSearchRequest] = useState<{ term: string; id: number } | null>(null);
+
   const [activeTerminalSessionId, setActiveTerminalSessionId] = useState<string | null>(null);
   const [terminalFocusRequest, setTerminalFocusRequest] = useState(0);
   const [terminalFolderError, setTerminalFolderError] = useState<string | null>(null);
@@ -199,6 +203,9 @@ export default function App() {
   const activePaneIdRef = useRef(activePaneId);
   const isSidebarOpenRef = useRef(isSidebarOpen);
   const sidebarTabRef = useRef(sidebarTab);
+  const pendingCloseOperationRef = useRef(pendingCloseOperation);
+  const isCloseAllConfirmationOpenRef = useRef(isCloseAllConfirmationOpen);
+  const searchRequestIdRef = useRef(0);
   const editorRefs = useRef(new Map<string, EditorHandle>());
   const workspaceRef = useRef<HTMLDivElement>(null);
   const sidebarContainerRef = useRef<HTMLDivElement>(null);
@@ -232,6 +239,8 @@ export default function App() {
   activePaneIdRef.current = activePaneId;
   isSidebarOpenRef.current = isSidebarOpen;
   sidebarTabRef.current = sidebarTab;
+  pendingCloseOperationRef.current = pendingCloseOperation;
+  isCloseAllConfirmationOpenRef.current = isCloseAllConfirmationOpen;
 
   const activeTab = tabs.find(tab => tab.id === activeTabId);
   const activeLineEnding = useMemo(() => activeTab ? lineEnding(activeTab.content) : '—', [activeTab?.content]);
@@ -542,6 +551,8 @@ export default function App() {
     sidebarTabRef.current = 'search';
     setIsSidebarOpen(true);
     setSidebarTab('search');
+    // A plain Search open must not replay a previous Space `s w` query.
+    setSearchRequest(null);
     focusSearchInput();
   };
 
@@ -597,8 +608,9 @@ export default function App() {
   };
 
   // Space leader commands reuse the same state transitions as the command
-  // palette and Ctrl shortcuts instead of introducing separate actions.
-  const runVimLeaderAction = (action: VimLeaderAction) => {
+  // palette and Ctrl shortcuts instead of introducing separate actions. Local
+  // actions receive the pane/tab that was focused when the sequence completed.
+  const runVimLeaderAction = (action: VimLeaderAction, target: VimEditorTarget) => {
     switch (action) {
       case 'command-palette':
         openPalette();
@@ -607,12 +619,36 @@ export default function App() {
         setIsSidebarOpen(value => !value);
         break;
       case 'search':
-        setIsSidebarOpen(true);
-        setSidebarTab('search');
-        focusSearchInput();
+        showSearchSidebar();
         break;
       case 'quick-open':
         openQuickOpen();
+        break;
+      case 'save-file':
+        void handleSaveFile(target.tabId);
+        break;
+      case 'save-all':
+        void handleSaveAll();
+        break;
+      case 'close-tab':
+        if (guardPendingCloseDialog()) break;
+        requestCloseTab(target.tabId, target.paneId);
+        break;
+      case 'force-close-tab':
+        if (guardPendingCloseDialog()) break;
+        forceCloseTabOccurrence(target);
+        break;
+      case 'search-word':
+        searchForCursorWord(target);
+        break;
+      case 'clear-search-highlight':
+        editorRefs.current.get(target.paneId)?.clearSearchHighlight();
+        break;
+      case 'toggle-word-wrap':
+        setWordWrap(value => !value);
+        break;
+      case 'toggle-line-numbers':
+        setEditorPreferences(current => ({ ...current, lineNumbers: !current.lineNumbers }));
         break;
     }
   };
@@ -880,6 +916,74 @@ export default function App() {
     setActivePaneId(activePaneIdRef.current);
     activeTabIdRef.current = selected?.tabId ?? '';
     setActiveTabId(activeTabIdRef.current);
+  };
+
+  const guardPendingCloseDialog = (): boolean => {
+    if (pendingCloseOperationRef.current === null && !isCloseAllConfirmationOpenRef.current) return false;
+    addToast('Finish the current close operation first.', 'warning');
+    return true;
+  };
+
+  const forceCloseTabOccurrence = (target: VimEditorTarget) => {
+    const pane = panesRef.current.find(item => item.id === target.paneId && item.kind === 'editor');
+    if (!pane || !pane.tabIds.includes(target.tabId)) return;
+    applyTabClosures([{ tabId: target.tabId, paneId: target.paneId }]);
+  };
+
+  const searchForCursorWord = (target: VimEditorTarget) => {
+    const word = editorRefs.current.get(target.paneId)?.getCursorWord();
+    if (!word) return;
+    showSearchSidebar();
+    searchRequestIdRef.current += 1;
+    setSearchRequest({ term: word, id: searchRequestIdRef.current });
+  };
+
+  /**
+   * Ex `:q` closes only the pane occurrence that invoked it. A dirty occurrence
+   * is refused with a notification; Vim's own prompt is the only confirmation.
+   */
+  const handleExQuit = (target: VimEditorTarget, force: boolean) => {
+    if (guardPendingCloseDialog()) return;
+    const pane = panesRef.current.find(item => item.id === target.paneId && item.kind === 'editor');
+    const tab = tabsRef.current.find(item => item.id === target.tabId);
+    if (!pane || !tab || !pane.tabIds.includes(target.tabId)) return;
+    if (!force && tab.content !== tab.savedContent) {
+      addToast(`${getFileNameFromPath(tab.path)} has unsaved changes.`, 'warning');
+      return;
+    }
+    applyTabClosures([{ tabId: target.tabId, paneId: target.paneId }]);
+  };
+
+  /**
+   * Ex `:wq` reuses the existing save flow and closes only after it succeeds.
+   * The captured target is revalidated after the await, and the tab must still
+   * be clean: an edit made while the write was pending keeps it open.
+   */
+  const handleExWriteQuit = async (target: VimEditorTarget) => {
+    if (guardPendingCloseDialog()) return;
+    const pane = panesRef.current.find(item => item.id === target.paneId && item.kind === 'editor');
+    const tab = tabsRef.current.find(item => item.id === target.tabId);
+    if (!pane || !tab || !pane.tabIds.includes(target.tabId)) return;
+
+    if (!(await handleSaveFile(target.tabId))) return;
+
+    const savedTab = tabsRef.current.find(item => item.id === target.tabId);
+    if (!savedTab || savedTab.content !== savedTab.savedContent) return;
+    if (guardPendingCloseDialog()) return;
+    const savedPane = panesRef.current.find(item => item.id === target.paneId && item.kind === 'editor');
+    if (!savedPane || !savedPane.tabIds.includes(target.tabId)) return;
+    applyTabClosures([{ tabId: target.tabId, paneId: target.paneId }]);
+  };
+
+  const handleSaveAll = async () => {
+    // Snapshot the dirty set up front: saves may change paths/savedContent, but
+    // the sequence must not chase tabs that were already clean at invocation.
+    const dirtyTabIds = tabsRef.current
+      .filter(tab => tab.content !== tab.savedContent)
+      .map(tab => tab.id);
+    for (const tabId of dirtyTabIds) {
+      if (!(await handleSaveFile(tabId))) return;
+    }
   };
 
   const addUntitledTab = () => {
@@ -1349,6 +1453,8 @@ export default function App() {
           ) : (
             <SearchPanel
               rootPath={explorerRootPath}
+              request={searchRequest}
+              onRequestConsumed={() => setSearchRequest(null)}
               onOpenFile={(path, line) => { void handleOpenFile(path, false, line); }}
               onExitToEditor={focusActiveEditorFromSidebar}
               onClose={() => setIsSidebarOpen(false)}
@@ -1530,6 +1636,8 @@ export default function App() {
                           onChange={value => handleEditorChange(file.id, value)}
                           onSaveRequest={tabId => { void handleSaveFile(tabId); }}
                           onVimLeaderAction={runVimLeaderAction}
+                          onExQuitRequest={handleExQuit}
+                          onExWriteQuitRequest={target => { void handleExWriteQuit(target); }}
                           onFocus={() => {
                             lastFocusedEditorPaneRef.current = pane.id;
                             selectPane(pane.id);

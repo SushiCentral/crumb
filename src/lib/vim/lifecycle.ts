@@ -38,6 +38,14 @@ export interface VimPublicState {
 }
 
 export type VimWriteHandler = () => void;
+export type VimQuitHandler = (force: boolean) => void;
+export type VimWriteQuitHandler = () => void;
+
+export interface VimAdapterHandlers {
+  readonly write?: VimWriteHandler;
+  readonly quit?: VimQuitHandler;
+  readonly writeQuit?: VimWriteQuitHandler;
+}
 
 export interface VimRegisterSnapshot {
   readonly text: string;
@@ -45,9 +53,18 @@ export interface VimRegisterSnapshot {
   readonly blockwise: boolean;
 }
 
-interface VimWriteAdapter extends CodeMirror {
+interface VimHostAdapter extends CodeMirror {
   __crumbVimWrite?: VimWriteHandler;
+  __crumbVimQuit?: VimQuitHandler;
+  __crumbVimWriteQuit?: VimWriteQuitHandler;
 }
+
+/**
+ * Handlers are registered per EditorView, not per engine adapter. A tab switch
+ * installs a fresh adapter through `EditorView.setState()`, so `patchVimAdapter`
+ * reapplies these handlers to every adapter created for the same view.
+ */
+const adapterHandlers = new WeakMap<EditorView, VimAdapterHandlers>();
 
 interface SearchSnapshot {
   query: unknown;
@@ -570,11 +587,16 @@ function positionAtContainingMatch(
  */
 export function patchVimAdapter(
   view: EditorView,
-  write?: VimWriteHandler,
+  handlers?: VimAdapterHandlers,
 ): (() => void) | null {
   const cm = getCM(view);
   if (!cm) return null;
-  if (write) (cm as VimWriteAdapter).__crumbVimWrite = write;
+  if (handlers) adapterHandlers.set(view, handlers);
+  const active = handlers ?? adapterHandlers.get(view);
+  const host = cm as VimHostAdapter;
+  host.__crumbVimWrite = active?.write;
+  host.__crumbVimQuit = active?.quit;
+  host.__crumbVimWriteQuit = active?.writeQuit;
   if (patchedAdapters.has(cm)) return null;
   patchedAdapters.add(cm);
   syncCommittedSearchDirection();
@@ -869,4 +891,15 @@ export function restoreVimAdapter(
 
 export function hasActiveVimAdapter(view: EditorView): boolean {
   return adapterVimState(view) !== null;
+}
+
+/**
+ * Run the engine's own `:nohlsearch` path for a view. It cancels the engine's
+ * pending delayed-overlay repaint and clears the committed search overlay while
+ * preserving the stored pattern, so `n`/`N` continue to work.
+ */
+export function clearVimSearchHighlight(view: EditorView): void {
+  const cm = getCM(view);
+  if (!cm || !cm.state.vim) return;
+  Vim.handleEx(cm as Parameters<typeof Vim.handleEx>[0], 'nohlsearch');
 }

@@ -15,6 +15,11 @@ import { shouldVimOwnTab } from '../lib/vim/shortcuts';
 import type { VimSession, VimSessionBinding } from '../lib/vim/session';
 import VimLeaderGuide from './VimLeaderGuide';
 
+export interface VimEditorTarget {
+  readonly paneId: string;
+  readonly tabId: string;
+}
+
 interface EditorProps {
   paneId: string;
   vimSession: VimSession;
@@ -34,7 +39,11 @@ interface EditorProps {
   /** Route an argumentless Vim `:w` to Crumb's existing save flow. */
   onSaveRequest?: (tabId: string) => void;
   /** Route Space leader sequences into Crumb's existing application actions. */
-  onVimLeaderAction?: (action: VimLeaderAction) => void;
+  onVimLeaderAction?: (action: VimLeaderAction, target: VimEditorTarget) => void;
+  /** Route Vim `:q`/`:q!` for the pane and tab that invoked it. */
+  onExQuitRequest?: (target: VimEditorTarget, force: boolean) => void;
+  /** Route Vim `:wq` for the pane and tab that invoked it. */
+  onExWriteQuitRequest?: (target: VimEditorTarget) => void;
   onFocus?: () => void;
   /** Typed Vim mode/pending snapshot for the active application status bar. */
   onVimStateChange?: (paneId: string, state: VimPublicState) => void;
@@ -45,6 +54,10 @@ export interface EditorHandle {
   jumpToLine: (line: number) => void;
   /** Current mode snapshot used by App's capture-phase shortcut policy. */
   getVimState: () => VimPublicState | null;
+  /** Word at the primary cursor head, or null when the cursor is not on one. */
+  getCursorWord: () => string | null;
+  /** Clear the engine's committed search overlay without discarding the pattern. */
+  clearSearchHighlight: () => void;
 }
 
 const externalDocUpdate = Annotation.define<boolean>();
@@ -95,7 +108,7 @@ function editorAppearance(theme: Theme, fontSize: number, fontFamily: string) {
   }, { dark: theme.dark });
 }
 
-const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, vimSession, tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, preferences, vimConfig = defaultVimConfig, onChange, onCursorChange, onSaveRequest, onVimLeaderAction, onFocus, onVimStateChange }, ref) {
+const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, vimSession, tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, preferences, vimConfig = defaultVimConfig, onChange, onCursorChange, onSaveRequest, onVimLeaderAction, onExQuitRequest, onExWriteQuitRequest, onFocus, onVimStateChange }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const statesRef = useRef(new Map<string, EditorState>());
@@ -105,10 +118,14 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
   const onVimStateChangeRef = useRef(onVimStateChange);
   const onSaveRequestRef = useRef(onSaveRequest);
   const onVimLeaderActionRef = useRef(onVimLeaderAction);
+  const onExQuitRequestRef = useRef(onExQuitRequest);
+  const onExWriteQuitRequestRef = useRef(onExWriteQuitRequest);
   onCursorChangeRef.current = onCursorChange;
   onVimStateChangeRef.current = onVimStateChange;
   onSaveRequestRef.current = onSaveRequest;
   onVimLeaderActionRef.current = onVimLeaderAction;
+  onExQuitRequestRef.current = onExQuitRequest;
+  onExWriteQuitRequestRef.current = onExWriteQuitRequest;
 
   // The guide is pane-local React state. The Vim extension only forwards the
   // visible prefix through this ref, so the overlay is a sibling of the
@@ -160,11 +177,24 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
   if (vimRef.current === null) {
     vimRef.current = createVimExtension(vimConfig, {
       onWrite: () => onSaveRequestRef.current?.(activeTabRef.current),
+      // The host callbacks capture the originating pane and tab synchronously;
+      // App must never resolve a later close against the then-active tab.
+      onQuit: force => onExQuitRequestRef.current?.(
+        { paneId, tabId: activeTabRef.current },
+        force,
+      ),
+      onWriteQuit: () => onExWriteQuitRequestRef.current?.({
+        paneId,
+        tabId: activeTabRef.current,
+      }),
       // Editor fixtures that do not wire application actions keep Space as
       // the engine's normal right-motion.
       leader: onVimLeaderActionRef.current
         ? {
-          dispatch: action => onVimLeaderActionRef.current?.(action),
+          dispatch: action => onVimLeaderActionRef.current?.(
+            action,
+            { paneId, tabId: activeTabRef.current },
+          ),
           onGuideChange: prefix => leaderGuideChangeRef.current(prefix),
         }
         : undefined,
@@ -231,6 +261,18 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
     getVimState: () => {
       const view = viewRef.current;
       return view ? vim.getState(view) : null;
+    },
+    getCursorWord: () => {
+      const view = viewRef.current;
+      if (!view) return null;
+      const word = view.state.wordAt(view.state.selection.main.head);
+      if (!word) return null;
+      const text = view.state.sliceDoc(word.from, word.to);
+      return text.length > 0 ? text : null;
+    },
+    clearSearchHighlight: () => {
+      const view = viewRef.current;
+      if (view) vim.clearSearchHighlight(view);
     },
   }), [vim]);
 

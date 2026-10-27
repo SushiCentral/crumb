@@ -18,7 +18,15 @@ export type VimLeaderAction =
   | 'command-palette'
   | 'toggle-file-tree'
   | 'search'
-  | 'quick-open';
+  | 'quick-open'
+  | 'save-file'
+  | 'save-all'
+  | 'close-tab'
+  | 'force-close-tab'
+  | 'search-word'
+  | 'clear-search-highlight'
+  | 'toggle-word-wrap'
+  | 'toggle-line-numbers';
 
 export interface VimLeaderBinding {
   readonly keys: readonly string[];
@@ -37,7 +45,7 @@ export const VIM_LEADER_TIMEOUT_MS = 10000;
  * The reveal timer is started by the initial Space and is not restarted by
  * later prefix keys.
  */
-export const VIM_LEADER_GUIDE_DELAY_MS = 500;
+export const VIM_LEADER_GUIDE_DELAY_MS = 200;
 
 export const VIM_LEADER_BINDINGS: readonly VimLeaderBinding[] = Object.freeze([
   Object.freeze({ keys: Object.freeze(['Space', 'Space']), action: 'command-palette' }),
@@ -45,6 +53,14 @@ export const VIM_LEADER_BINDINGS: readonly VimLeaderBinding[] = Object.freeze([
   Object.freeze({ keys: Object.freeze(['Space', 'e']), action: 'toggle-file-tree' }),
   Object.freeze({ keys: Object.freeze(['Space', '/']), action: 'search' }),
   Object.freeze({ keys: Object.freeze(['Space', 'f', 'f']), action: 'quick-open' }),
+  Object.freeze({ keys: Object.freeze(['Space', 'f', 's']), action: 'save-file' }),
+  Object.freeze({ keys: Object.freeze(['Space', 'f', 'S']), action: 'save-all' }),
+  Object.freeze({ keys: Object.freeze(['Space', 'b', 'd']), action: 'close-tab' }),
+  Object.freeze({ keys: Object.freeze(['Space', 'b', 'D']), action: 'force-close-tab' }),
+  Object.freeze({ keys: Object.freeze(['Space', 's', 'w']), action: 'search-word' }),
+  Object.freeze({ keys: Object.freeze(['Space', 's', 'h']), action: 'clear-search-highlight' }),
+  Object.freeze({ keys: Object.freeze(['Space', 'u', 'w']), action: 'toggle-word-wrap' }),
+  Object.freeze({ keys: Object.freeze(['Space', 'u', 'n']), action: 'toggle-line-numbers' }),
 ]);
 
 export type VimLeaderMatch =

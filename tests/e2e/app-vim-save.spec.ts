@@ -257,7 +257,7 @@ test('unsupported Ex writes never invoke the save dialog or filesystem', async (
   await runEx(page, 'w other.txt');
   await expect(page.locator('.cm-vim-message')).toContainText('only argumentless :w');
 
-  for (const command of ['w!', 'wq', 'q']) {
+  for (const command of ['w!', 'wq!']) {
     await runEx(page, command);
   }
 
@@ -267,4 +267,229 @@ test('unsupported Ex writes never invoke the save dialog or filesystem', async (
   expect(snapshot.writeCalls).toHaveLength(0);
   await expect(page.locator('.editor-tab')).toHaveCount(1);
   await expect(tab(page, 'Untitled').locator('.editor-tab-dirty')).toHaveCount(1);
+});
+
+test(':q refuses a dirty tab with a notification and no confirmation dialog', async ({ page }) => {
+  await openApp(page, { vim: true, saveResult: '/tmp/dirty.ts' });
+  await newFile(page);
+  await appendAtEnd(page, ' changed');
+
+  await runEx(page, 'q');
+
+  await expect(page.locator('.editor-tab')).toHaveCount(1);
+  await expect(tab(page, 'Untitled').locator('.editor-tab-dirty')).toHaveCount(1);
+  await expect(page.locator('.toast-item')).toContainText('has unsaved changes');
+  await expect(page.locator('[role="dialog"][aria-label="Unsaved changes"]')).toHaveCount(0);
+  const snapshot = await appStub(page);
+  expect(snapshot.saveCalls).toBe(0);
+  expect(snapshot.writeCalls).toHaveLength(0);
+});
+
+test(':q closes a clean tab without confirmation', async ({ page }) => {
+  await openApp(page, { vim: true, files: { '/tmp/clean.ts': 'const clean = 1;\n' } });
+  await openFileViaShortcut(page, '/tmp/clean.ts');
+  await expect(page.locator('.editor-tab')).toHaveCount(1);
+
+  await runEx(page, 'q');
+
+  await expect(page.locator('.editor-tab')).toHaveCount(0);
+  await expect(page.locator('[role="dialog"][aria-label="Unsaved changes"]')).toHaveCount(0);
+});
+
+test(':q! discards a dirty tab without confirmation', async ({ page }) => {
+  await openApp(page, { vim: true });
+  await newFile(page);
+  await appendAtEnd(page, ' discard me');
+
+  await runEx(page, 'q!');
+
+  await expect(page.locator('.editor-tab')).toHaveCount(0);
+  await expect(page.locator('[role="dialog"][aria-label="Unsaved changes"]')).toHaveCount(0);
+  expect((await appStub(page)).writeCalls).toHaveLength(0);
+});
+
+test(':wq saves the originating tab and closes it only after the write resolves', async ({ page }) => {
+  await openApp(page, { vim: true, files: { '/tmp/wq.ts': 'const wq = 1;\n' } });
+  await openFileViaShortcut(page, '/tmp/wq.ts');
+  await appendAtEnd(page, ' // wq');
+  await page.evaluate(() => {
+    (window as unknown as Record<string, { setHoldWrites: (value: boolean) => void }>).__crumbTest.setHoldWrites(true);
+  });
+
+  await runEx(page, 'wq');
+
+  await expect.poll(async () => (await appStub(page)).writeCalls.length).toBe(1);
+  expect((await appStub(page)).writeCalls[0]).toMatchObject({ path: '/tmp/wq.ts', status: 'pending' });
+  // The tab stays open while the save is in flight.
+  await expect(page.locator('.editor-tab')).toHaveCount(1);
+
+  await page.evaluate(() => {
+    (window as unknown as Record<string, { releaseWrite: (index?: number) => void }>).__crumbTest.releaseWrite(0);
+  });
+
+  await expect(page.locator('.editor-tab')).toHaveCount(0);
+  const snapshot = await appStub(page);
+  expect(snapshot.writeCalls).toHaveLength(1);
+  expect(snapshot.writeCalls[0]).toMatchObject({ path: '/tmp/wq.ts', status: 'resolved' });
+  expect(snapshot.writeCalls[0].content).toContain('// wq');
+});
+
+test(':wq closes only the originating tab after the user switches tabs during the held write', async ({ page }) => {
+  await openApp(page, {
+    vim: true,
+    files: {
+      '/tmp/wq-origin.ts': 'const origin = 1;\n',
+      '/tmp/wq-other.ts': 'const other = 1;\n',
+    },
+  });
+
+  await openFileViaShortcut(page, '/tmp/wq-origin.ts');
+  await openFileViaShortcut(page, '/tmp/wq-other.ts');
+  await appendAtEnd(page, ' // other');
+  await tabLabel(page, 'wq-origin.ts').click();
+  await appendAtEnd(page, ' // origin');
+  await expect(page.locator('.editor-tab')).toHaveCount(2);
+  await expect(tab(page, 'wq-origin.ts').locator('.editor-tab-dirty')).toHaveCount(1);
+  await expect(tab(page, 'wq-other.ts').locator('.editor-tab-dirty')).toHaveCount(1);
+
+  // Start :wq on the origin tab and leave its write pending.
+  await tabLabel(page, 'wq-origin.ts').click();
+  await expect(page.locator('.cm-content')).toContainText('// origin');
+  await page.evaluate(() => {
+    (window as unknown as Record<string, { setHoldWrites: (value: boolean) => void }>).__crumbTest.setHoldWrites(true);
+  });
+  await runEx(page, 'wq');
+
+  await expect.poll(async () => (await appStub(page)).writeCalls.length).toBe(1);
+  expect((await appStub(page)).writeCalls[0]).toMatchObject({
+    path: '/tmp/wq-origin.ts',
+    status: 'pending',
+  });
+  expect((await appStub(page)).writeCalls[0].content).toContain('// origin');
+
+  // The close target must stay bound to the origin tab, not the tab that is
+  // active when the write resolves.
+  await tabLabel(page, 'wq-other.ts').click();
+  await expect(page.locator('.cm-content')).toContainText('// other');
+
+  await page.evaluate(() => {
+    (window as unknown as Record<string, { releaseWrite: (index?: number) => void }>).__crumbTest.releaseWrite(0);
+  });
+
+  await expect.poll(async () => (await appStub(page)).writeCalls[0].status).toBe('resolved');
+  await expect(tab(page, 'wq-origin.ts')).toHaveCount(0);
+  await expect(tab(page, 'wq-other.ts')).toHaveCount(1);
+  await expect(tab(page, 'wq-other.ts').locator('.editor-tab-dirty')).toHaveCount(1);
+  await expect(page.locator('.editor-tab')).toHaveCount(1);
+  await expect(page.locator('.cm-content')).toContainText('// other');
+
+  const snapshot = await appStub(page);
+  expect(snapshot.writeCalls).toHaveLength(1);
+  expect(snapshot.writeCalls[0]).toMatchObject({
+    path: '/tmp/wq-origin.ts',
+    status: 'resolved',
+  });
+});
+
+test(':wq keeps the tab open when Save As is cancelled', async ({ page }) => {
+  await openApp(page, { vim: true, saveResult: null });
+  await newFile(page);
+  await appendAtEnd(page, ' draft');
+
+  await runEx(page, 'wq');
+
+  await expect.poll(async () => (await appStub(page)).saveCalls).toBe(1);
+  await page.waitForTimeout(100);
+  const snapshot = await appStub(page);
+  expect(snapshot.writeCalls).toHaveLength(0);
+  await expect(page.locator('.editor-tab')).toHaveCount(1);
+  await expect(tab(page, 'Untitled').locator('.editor-tab-dirty')).toHaveCount(1);
+  await expect(page.locator('[role="dialog"][aria-label="Unsaved changes"]')).toHaveCount(0);
+});
+
+test(':wq keeps the tab open when the write fails', async ({ page }) => {
+  await openApp(page, { vim: true, saveResult: '/tmp/wq-failure.ts' });
+  await newFile(page);
+  await appendAtEnd(page, ' changed');
+  await page.evaluate(() => {
+    (window as unknown as Record<string, { failNextWrite: (message: string) => void }>).__crumbTest.failNextWrite('disk is full');
+  });
+
+  await runEx(page, 'wq');
+
+  await expect.poll(async () => (await appStub(page)).writeCalls).toHaveLength(1);
+  expect((await appStub(page)).writeCalls[0]).toMatchObject({
+    path: '/tmp/wq-failure.ts',
+    status: 'rejected',
+    error: 'disk is full',
+  });
+  await expect(page.locator('.toast-item')).toContainText('Could not save file');
+  await expect(page.locator('.editor-tab')).toHaveCount(1);
+  await expect(tab(page, 'Untitled').locator('.editor-tab-dirty')).toHaveCount(1);
+});
+
+test(':wq keeps the tab open when new edits arrive during the save', async ({ page }) => {
+  await openApp(page, { vim: true, files: { '/tmp/wq-edit.ts': 'const wq = 1;\n' } });
+  await openFileViaShortcut(page, '/tmp/wq-edit.ts');
+  await appendAtEnd(page, ' // first');
+  await page.evaluate(() => {
+    (window as unknown as Record<string, { setHoldWrites: (value: boolean) => void }>).__crumbTest.setHoldWrites(true);
+  });
+
+  await runEx(page, 'wq');
+  await expect.poll(async () => (await appStub(page)).writeCalls.length).toBe(1);
+  expect((await appStub(page)).writeCalls[0].content).toContain('// first');
+  expect((await appStub(page)).writeCalls[0].content).not.toContain('// second');
+
+  // Edit the same tab while its save is still in flight.
+  await appendAtEnd(page, ' // second');
+  await page.evaluate(() => {
+    (window as unknown as Record<string, { releaseWrite: (index?: number) => void }>).__crumbTest.releaseWrite(0);
+  });
+
+  await expect.poll(async () => (await appStub(page)).writeCalls[0].status).toBe('resolved');
+  await expect(page.locator('.editor-tab')).toHaveCount(1);
+  await expect(tab(page, 'wq-edit.ts').locator('.editor-tab-dirty')).toHaveCount(1);
+  await expect(page.locator('.cm-content')).toContainText('// second');
+});
+
+test('unsupported Ex quit and write-quit forms never perform host actions', async ({ page }) => {
+  await openApp(page, { vim: true, saveResult: '/tmp/unsupported-ex.ts' });
+  await newFile(page);
+  await appendAtEnd(page, ' changed');
+
+  for (const command of ['1q', 'q other', 'q!!', 'wq!', 'wq other', '1wq']) {
+    await runEx(page, command);
+  }
+
+  await page.waitForTimeout(100);
+  const snapshot = await appStub(page);
+  expect(snapshot.saveCalls).toBe(0);
+  expect(snapshot.writeCalls).toHaveLength(0);
+  await expect(page.locator('.editor-tab')).toHaveCount(1);
+  await expect(tab(page, 'Untitled').locator('.editor-tab-dirty')).toHaveCount(1);
+  await expect(page.locator('[role="dialog"][aria-label="Unsaved changes"]')).toHaveCount(0);
+});
+
+test(':q closes only the originating pane occurrence of a shared tab', async ({ page }) => {
+  await openApp(page, { vim: true, files: { '/tmp/shared.ts': 'const shared = 1;\n' } });
+  await openFileViaShortcut(page, '/tmp/shared.ts');
+  await focusEditor(page);
+
+  await page.keyboard.press('Control+Shift+p');
+  await page.locator('.palette-input').fill('open active file in split');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.editor-pane')).toHaveCount(2);
+  await expect(page.locator('.editor-tab')).toHaveCount(2);
+
+  // Run :q in the second pane; the first pane must keep its occurrence.
+  const splitPane = page.locator('.editor-pane').nth(1);
+  await splitPane.locator('.cm-content').click();
+  await expect(splitPane.locator('.cm-content')).toBeFocused();
+  await page.keyboard.type(':q');
+  await page.keyboard.press('Enter');
+
+  await expect(page.locator('.editor-pane')).toHaveCount(1);
+  await expect(page.locator('.editor-tab')).toHaveCount(1);
+  await expect(page.locator('.cm-content')).toContainText('const shared = 1;');
 });

@@ -12,16 +12,20 @@ import {
 import {
   cancelTransientInput,
   captureVimAdapter,
+  clearVimSearchHighlight,
   getVimPublicState,
   getVimRegister,
   observeVimPublicState,
   patchVimAdapter,
   restoreVimAdapter,
+  type VimAdapterHandlers,
   type VimDocumentMarks,
   type VimPublicState,
+  type VimQuitHandler,
   type VimRegisterSnapshot,
   type VimRepeatSnapshot,
   type VimWriteHandler,
+  type VimWriteQuitHandler,
 } from './lifecycle.ts';
 
 export type { VimPublicMode, VimPublicState, VimPublicMode as VimMode } from './lifecycle.ts';
@@ -32,6 +36,10 @@ export interface VimExtensionOptions {
    * document/tab before starting its asynchronous save.
    */
   onWrite?: VimWriteHandler;
+  /** Invoked by an argumentless `:q` (force=false) or `:q!` (force=true). */
+  onQuit?: VimQuitHandler;
+  /** Invoked by an argumentless `:wq`; the host saves and then closes. */
+  onWriteQuit?: VimWriteQuitHandler;
   /**
    * Route Crumb leader commands into the application's existing actions. Omit
    * to leave Space as the engine's normal right-motion.
@@ -52,6 +60,18 @@ export function isArgumentlessWrite(params: VimWriteParameters): boolean {
     && params.lineEnd === undefined
     && (!params.argString || params.argString.trim().length === 0)
     && (!params.args || params.args.length === 0);
+}
+
+/**
+ * `:q` accepts no range or argument. Its only supported modifier is the force
+ * bang, reported separately so the host can discard instead of refusing.
+ */
+export function vimQuitForce(params: VimWriteParameters): boolean | null {
+  if (params.line !== undefined || params.lineEnd !== undefined) return null;
+  const arg = (params.argString ?? '').trim();
+  if (arg !== '' && arg !== '!') return null;
+  if (params.args?.some(value => value !== '!')) return null;
+  return arg === '!';
 }
 
 /**
@@ -86,12 +106,18 @@ function installVimEngineDefaults(): void {
   Vim.setOption('pcre', false);
 }
 
-let writeCommandInstalled = false;
+let exCommandsInstalled = false;
 
 type VimExCallback = Parameters<typeof Vim.defineEx>[2];
 type VimExCodeMirror = Parameters<VimExCallback>[0];
 
-function showUnsupportedWrite(cm: VimExCodeMirror, message: string): void {
+interface VimExHost extends VimExCodeMirror {
+  __crumbVimWrite?: VimWriteHandler;
+  __crumbVimQuit?: VimQuitHandler;
+  __crumbVimWriteQuit?: VimWriteQuitHandler;
+}
+
+function showVimMessage(cm: VimExCodeMirror, message: string): void {
   const adapter = cm as unknown as {
     openNotification?: (node: Element, options?: Record<string, unknown>) => void;
   };
@@ -102,17 +128,35 @@ function showUnsupportedWrite(cm: VimExCodeMirror, message: string): void {
   adapter.openNotification(node, { bottom: true, duration: 2000 });
 }
 
-function installVimWriteCommand(): void {
-  if (writeCommandInstalled) return;
-  writeCommandInstalled = true;
+function installVimExCommands(): void {
+  if (exCommandsInstalled) return;
+  exCommandsInstalled = true;
 
   Vim.defineEx('write', 'w', (cm, params) => {
     if (!isArgumentlessWrite(params)) {
-      showUnsupportedWrite(cm, 'Crumb Vim supports only argumentless :w');
+      showVimMessage(cm, 'Crumb Vim supports only argumentless :w');
       return;
     }
-    const adapter = cm as unknown as { __crumbVimWrite?: VimWriteHandler };
-    adapter.__crumbVimWrite?.();
+    (cm as VimExHost).__crumbVimWrite?.();
+  });
+
+  Vim.defineEx('quit', 'q', (cm, params) => {
+    const force = vimQuitForce(params);
+    if (force === null) {
+      showVimMessage(cm, 'Crumb Vim supports only :q or :q!');
+      return;
+    }
+    (cm as VimExHost).__crumbVimQuit?.(force);
+  });
+
+  Vim.defineEx('wq', 'wq', (cm, params) => {
+    // :wq always writes before closing, so it rejects ranges, arguments, and
+    // the force bang; :wq! must never discard unsaved changes.
+    if (!isArgumentlessWrite(params)) {
+      showVimMessage(cm, 'Crumb Vim supports only argumentless :wq');
+      return;
+    }
+    (cm as VimExHost).__crumbVimWriteQuit?.();
   });
 }
 
@@ -131,6 +175,8 @@ export interface VimExtension {
   observeState(view: EditorView, listener: (state: VimPublicState) => void): () => void;
   /** Exit insert/visual/search and clear pending keys before a lifecycle change. */
   cancelInput(view: EditorView): void;
+  /** Run the engine's `:nohlsearch` for this view, preserving the search pattern. */
+  clearSearchHighlight(view: EditorView): void;
   /** Capture session state before the caller replaces the EditorState. */
   beforeActivation(view: EditorView, documentId: string): void;
   /** Restore session state after the caller has installed the new EditorState. */
@@ -169,17 +215,22 @@ export function createVimExtension(
     isNonRecursive: (mapping, context) =>
       !hasExplicitNormalY && mapping.lhs === 'Y' && mapping.rhs === 'y$' && context === 'normal',
   });
-  installVimWriteCommand();
+  installVimExCommands();
 
   // This plugin only patches the newly created Vim adapter. It runs after
   // `vim()` in the extension list, so `getCM(view)` is populated. Its cleanup
   // removes adapter-owned DOM listeners/timers when the plugin is recreated or
   // Vim is disabled.
+  const handlers: VimAdapterHandlers = {
+    write: options.onWrite,
+    quit: options.onQuit,
+    writeQuit: options.onWriteQuit,
+  };
   const adapterLifecyclePlugin = ViewPlugin.fromClass(class {
     private cleanup: (() => void) | null = null;
 
     constructor(view: EditorView) {
-      this.cleanup = patchVimAdapter(view, options.onWrite);
+      this.cleanup = patchVimAdapter(view, handlers);
     }
 
     destroy() {
@@ -207,6 +258,7 @@ export function createVimExtension(
     getRegister: getVimRegister,
     observeState: observeVimPublicState,
     cancelInput: cancelTransientInput,
+    clearSearchHighlight: clearVimSearchHighlight,
     beforeActivation: (view, documentId) => {
       const captured = captureVimAdapter(view);
       if (!captured) return;

@@ -46,7 +46,7 @@ receive those keys unchanged. On macOS, Command shortcuts remain application
 shortcuts unless an explicit Vim mapping owns the key. In Normal and Visual
 modes, Space starts Crumb's leader sequences instead of moving right. An
 incomplete sequence expires after 10000 ms; the leader guide appears if the
-sequence is still incomplete 500 ms after the initial Space, then filters as
+sequence is still incomplete 200 ms after the initial Space, then filters as
 later prefix keys arrive. The guide delay is started by the initial Space and is
 not restarted by later keys. Space remains ordinary text in Insert mode and
 remains a Vim motion when an operator, count, or register prefix is already
@@ -58,6 +58,30 @@ The initial leader actions are:
 - `Space E` or `Space e` toggles the file tree.
 - `Space /` opens Search.
 - `Space f f` opens Quick Open.
+- `Space f s` saves the current file; `Space f S` saves all dirty files,
+  stopping if a save fails or is canceled.
+- `Space b d` closes the current tab through the unsaved-change confirmation;
+  `Space b D` discards changes and closes it.
+- `Space s w` searches the workspace for the word under the cursor as literal
+  text; `Space s h` clears Vim search highlighting without forgetting the search.
+- `Space u w` toggles word wrap; `Space u n` toggles line numbers. Both settings
+  persist through the existing editor preferences.
+
+The guide identifies Files, Buffers, Search, and UI submenus with a **GROUP**
+badge. Entering a group shows its name and only the immediate next keys.
+
+## Closing with Ex commands
+
+- `:q` closes the current tab occurrence in the originating editor pane only if
+  it has no unsaved changes; otherwise it refuses the close.
+- `:q!` discards unsaved changes and closes that tab occurrence.
+- `:wq` saves the originating tab, then closes it only if saving succeeds and
+  no newer unsaved changes remain. Canceling Save As or a write failure keeps
+  the tab open, even if focus moved to another tab during the save.
+
+These commands do not accept ranges or file arguments. They close Crumb tabs,
+not the application. `:noh` and `:nohlsearch` clear Vim search highlighting;
+`n` and `N` can still repeat the committed search.
 
 ## Typed configuration
 
@@ -153,7 +177,7 @@ tests never invoke Neovim.
 | Counts and history | Counts and count multiplication; `.` including counted repeat; `u` and `Ctrl-R` | [Neovim counts](https://neovim.io/doc/user/intro.html#count), [repeat](https://neovim.io/doc/user/repeat.html#.), [undo](https://neovim.io/doc/user/undo.html#u) | Oracle `count-multiplication`; `tests/e2e/vim-editor.spec.ts` “3dw deletes three words” and “dot repeats the last change”; `tests/e2e/editor-component.spec.ts` undo/toggle and repeated-toggle tests; `tests/e2e/vim-lifecycle.spec.ts` dot-repeat tests | **Partial.** Direct coverage for counts, multiplication, `.`, and `u`; no direct fixture for counted `.` or `Ctrl-R`. Repeat is session-wide across panes; same-document split panes retain independent CodeMirror undo histories. |
 | Search | `/ ? n N`; case-sensitive default; incremental search and wrap; common literals, classes, groups, boundaries, and escaping; no full Vim-regex parity | [Neovim search](https://neovim.io/doc/user/pattern.html#/), [`ignorecase`](https://neovim.io/doc/user/options.html#%27ignorecase%27), [`smartcase`](https://neovim.io/doc/user/options.html#%27smartcase%27) | `tests/e2e/vim-editor.spec.ts` “/word search finds matches and n/N traverse them”; oracle `search-is-case-sensitive`, `search-literal-parentheses`, `search-literal-plus`, `search-escaped-group-plus`, `search-escaped-plus`, `search-escaped-dot`, `search-vim-group-and-class`, `search-word-boundaries`, `search-backward-question-mark`, `search-backward-count`, `search-backward-operator`, `search-backward-visual`; lifecycle search cancellation tests | **Full for the approved subset; not full Vim-regex parity.** Case-sensitive engine behavior uses the package's public `pcre=false` Vim-regex translation. Supported examples are literals, `[classes]`, `\(...\)` groups, `\|` alternation, `\+`/`\?`, `\<`/`\>`, and escaped literals. `n`/`N` follow committed search direction. |
 | Marks/navigation | Local marks `m[a-z]`, `'a`, `` `a `` associated with the Crumb document; `Ctrl-O/I` only if existing jump behavior passes lifecycle tests | [Neovim marks](https://neovim.io/doc/user/motion.html#m), [jump list](https://neovim.io/doc/user/motion.html#CTRL-O) | `tests/e2e/vim-lifecycle.spec.ts` “local marks survive A -> B -> A…”, mark invalidation/release tests; `tests/e2e/editor-component.spec.ts` stale-mark test; `tests/e2e/editor-shared.spec.ts` mark-ownership tests | **Partial.** Direct coverage for `m[a-z]`, `` `a ``, cross-tab/document ownership, and release on close. `'a` linewise is not directly fixture-covered. `Ctrl-O/I` remains deferred/not guaranteed. |
-| Save | Argumentless `:w` invokes Crumb's existing save flow | [Neovim `:w`](https://neovim.io/doc/user/editing.html#:w) | Fixture-level: `tests/e2e/vim-editor.spec.ts` “argumentless :w invokes the save hook and unsupported Ex writes do not”; App-level stubbed Chromium integration: `tests/e2e/app-vim-save.spec.ts` (originating-tab async save after tab switch, untitled cancel/success, write failure, unsupported Ex) | **Full for the stubbed Chromium integration.** `:w` captures the originating tab ID synchronously and routes through the existing `handleSaveFile` path. Native Tauri dialog/filesystem/WebView behavior remains manually unrun. No `:q`, `:wq`, file arguments, ranges, or shell commands are connected. |
+| Save | Argumentless `:w` invokes Crumb's existing save flow | [Neovim `:w`](https://neovim.io/doc/user/editing.html#:w) | Fixture-level: `tests/e2e/vim-editor.spec.ts` “argumentless :w invokes the save hook and unsupported Ex writes do not”; App-level stubbed Chromium integration: `tests/e2e/app-vim-save.spec.ts` (originating-tab async save after tab switch, untitled cancel/success, write failure, unsupported Ex) | **Full for the stubbed Chromium integration.** `:w` captures the originating tab ID synchronously and routes through the existing `handleSaveFile` path. Native Tauri dialog/filesystem/WebView behavior remains manually unrun. The later save/close stage adds `:q`, `:q!`, and `:wq` as documented above; file arguments, ranges, and shell commands remain unsupported. |
 
 ### Fixture index for the matrix
 
@@ -178,7 +202,7 @@ Crumb follows Neovim defaults where Vim and Neovim differ:
 | Search case | `ignorecase=false`, `smartcase=false`; `/` and `?` are case-sensitive | [Neovim search options](https://neovim.io/doc/user/options.html#%27ignorecase%27); oracle `search-is-case-sensitive` |
 | Visual repeat | Repeating a Visual operator applies the same-size region in the supported cases; linewise/single-line charwise cases are covered | [Neovim `visual-repeat`](https://neovim.io/doc/user/visual.html#visual-repeat); oracle `visual-charwise-repeat`, `visual-linewise-repeat` |
 | Clipboard | No implicit unnamed-clipboard synchronization; explicit `+` is platform-dependent; `*` is deferred | [Neovim registers](https://neovim.io/doc/user/change.html#registers) |
-| `:w` | Only argumentless `:w` reaches Crumb's existing save flow | [Neovim `:w`](https://neovim.io/doc/user/editing.html#:w) |
+| `:w` | Argumentless `:w` reaches Crumb's existing save flow; `:wq` uses that flow before closing | [Neovim `:w`](https://neovim.io/doc/user/editing.html#:w) |
 
 ## Approved residuals and package-specific differences
 
@@ -246,8 +270,8 @@ The following are not part of this milestone:
 
 - Running Neovim, Lua, Vimscript, user init files, or third-party Vim plugins.
 - Macros (`q`, `@`), expression registers, and `@:`/`@@` repeat.
-- Ex substitution, `:g`/`:v`, ranges, file arguments, shell commands, `:q`,
-  `:wq`, `:e`, and other host-affecting Ex commands.
+- Ex substitution, `:g`/`:v`, ranges, file arguments, shell commands, `:e`,
+  and host-affecting Ex commands other than the documented save/close commands.
 - Vim windows, tabs, folds, terminal commands, tag objects, and
   language-semantic text objects.
 - A dedicated Vim settings panel and configurable app-versus-Vim shortcut
