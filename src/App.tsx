@@ -8,8 +8,9 @@ import { scaleShortcut, nextZoom } from './lib/scale-shortcuts';
 import { defaultSidebarWidth, readNumber, readBoolean, clampPanelHeight, clampSidebarWidth, readEditorPreferences, lineEnding } from './lib/preferences';
 import { createVimSession } from './lib/vim/session';
 import type { VimPublicState } from './lib/vim/extension';
+import type { VimLeaderAction } from './lib/vim/leader';
 import { shouldVimOwnShortcut, type VimFocusedSurface } from './lib/vim/shortcuts';
-import type { CursorInfo } from './lib/editor-extensions';
+import { isEditorReservedCtrlKey, type CursorInfo } from './lib/editor-extensions';
 import StatusBar, { type VimStatus } from './components/StatusBar';
 import { parseRecentProjects, recordProject, type RecentProject } from './lib/recent-projects';
 import Editor, { type EditorHandle } from "./components/Editor";
@@ -64,9 +65,11 @@ function focusedSurfaceFor(element: Element | null, flags: FocusedSurfaceFlags):
  * App would otherwise interpret as document commands. When focus belongs to a
  * terminal or a Vim prompt input, these keys belong to that input instead.
  * Keep this set aligned with VIM_BUILTIN_CTRL_KEYS in lib/vim/shortcuts.ts.
+ * Ctrl-H/J/K/L are handled separately: they are reserved in editors and never
+ * claimed by App, so terminals and native inputs receive them unchanged.
  */
 const INPUT_OWNED_VIM_CTRL_KEYS: ReadonlySet<string> = new Set([
-  'w', 'o', 'b', 'n', 'p', 'j',
+  'w', 'o', 'b', 'n', 'p',
 ]);
 
 function isInputOwnedVimCtrlKey(event: KeyboardEvent): boolean {
@@ -510,6 +513,27 @@ export default function App() {
     if (reason === 'cancel') restoreInvokerFocus();
   };
 
+  // Space leader commands reuse the same state transitions as the command
+  // palette and Ctrl shortcuts instead of introducing separate actions.
+  const runVimLeaderAction = (action: VimLeaderAction) => {
+    switch (action) {
+      case 'command-palette':
+        openPalette();
+        break;
+      case 'toggle-file-tree':
+        setIsSidebarOpen(value => !value);
+        break;
+      case 'search':
+        setIsSidebarOpen(true);
+        setSidebarTab('search');
+        focusSearchInput();
+        break;
+      case 'quick-open':
+        openQuickOpen();
+        break;
+    }
+  };
+
   const openInSplit = (tabId: string, kind: EditorPane['kind'] = 'editor'): string => {
     if (tabsRef.current.length === 0) return '';
     const pane: EditorPane = { id: crypto.randomUUID(), tabId, tabIds: kind === 'editor' ? [tabId] : [], kind };
@@ -932,6 +956,13 @@ export default function App() {
         paletteOpen: isPaletteOpen,
         dialogOpen: isSettingsOpen || currentPendingCloseId != null || isCloseAllConfirmationOpen,
       });
+
+      // Ctrl-H/J/K/L are reserved in editors: the Editor's high-precedence
+      // keymap consumes them before CodeMirror defaults or the Vim engine.
+      // App must not turn them into Crumb shortcuts. Terminal and native input
+      // focus falls through unchanged and keeps its own key handling.
+      if (focusedSurface === 'editor' && isEditorReservedCtrlKey(e)) return;
+
       const vimOwnsShortcut = shouldVimOwnShortcut({
         enabled: editorPreferences.vimModeEnabled,
         focusedSurface,
@@ -953,11 +984,8 @@ export default function App() {
       // sidebar inputs included) owns these Ctrl bindings. Returning without
       // preventDefault/stopPropagation lets xterm's PTY or the input handle the
       // key; Ctrl-S and other global shortcuts still fall through to App below.
-      const togglesTerminal = focusedSurface === 'terminal'
-        && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey
-        && e.key.toLowerCase() === 'j';
       if ((focusedSurface === 'terminal' || focusedSurface === 'input')
-        && !togglesTerminal && isInputOwnedVimCtrlKey(e)) return;
+        && isInputOwnedVimCtrlKey(e)) return;
 
       const scaling = scaleShortcut(e);
       if (scaling) {
@@ -1046,21 +1074,15 @@ export default function App() {
         addUntitledTab();
         return;
       }
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "j") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (isPanelOpen) focusActiveEditor();
-        setIsPanelOpen((prev) => !prev);
-        return;
-      }
-
       if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && (e.code === "Backquote" || e.key === "`")) {
         e.preventDefault();
         e.stopPropagation();
-        if (document.activeElement?.closest(".xterm")) {
+        if (isPanelOpen) {
           focusActiveEditor();
+          setIsPanelOpen(false);
         } else {
           setIsPanelOpen(true);
+          // Select the Terminal tab and focus its input, not merely the panel.
           setTerminalFocusRequest(value => value + 1);
         }
         return;
@@ -1088,7 +1110,7 @@ export default function App() {
     { id: 'theme', label: 'Preferences: Color Theme', detail: theme.name, run: () => {} },
     { id: 'code-font', label: 'Preferences: Editor Font', detail: `${codeFont} · ${fontSize}px`, run: () => {} },
     { id: 'search-files', label: 'View: Find in Files (Search)', shortcut: shortcutLabel('Shift+F'), run: () => { setIsSidebarOpen(true); setSidebarTab('search'); focusSearchInput(); } },
-    { id: 'terminal', label: isPanelOpen ? 'View: Hide Terminal' : 'View: Show Terminal', shortcut: shortcutLabel('J'), run: () => { setIsPanelOpen(value => !value); restoreInvokerFocus(); } },
+    { id: 'terminal', label: isPanelOpen ? 'View: Hide Terminal' : 'View: Show Terminal', shortcut: 'Ctrl+`', run: () => { setIsPanelOpen(value => !value); restoreInvokerFocus(); } },
     { id: 'explorer', label: isSidebarOpen ? 'View: Hide File Tree' : 'View: Show File Tree', shortcut: shortcutLabel('B'), run: () => { setIsSidebarOpen(value => !value); restoreInvokerFocus(); } },
     { id: 'word-wrap', label: wordWrap ? 'Editor: Disable Word Wrap' : 'Editor: Enable Word Wrap', detail: wordWrap ? 'Wrapping is on' : 'Wrapping is off', run: () => { setWordWrap(value => !value); restoreInvokerFocus(); } },
     { id: 'vim-mode', label: editorPreferences.vimModeEnabled ? 'Editor: Disable Vim Mode' : 'Editor: Enable Vim Mode', detail: editorPreferences.vimModeEnabled ? 'Vim mode is on' : 'Vim mode is off', run: () => { setEditorPreferences(current => ({ ...current, vimModeEnabled: !current.vimModeEnabled })); restoreInvokerFocus(); } },
@@ -1406,6 +1428,7 @@ export default function App() {
                           onVimStateChange={reportVimState}
                           onChange={value => handleEditorChange(file.id, value)}
                           onSaveRequest={tabId => { void handleSaveFile(tabId); }}
+                          onVimLeaderAction={runVimLeaderAction}
                           onFocus={() => {
                             lastFocusedEditorPaneRef.current = pane.id;
                             selectPane(pane.id);

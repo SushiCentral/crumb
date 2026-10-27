@@ -5,6 +5,11 @@ import type { EditorView } from '@codemirror/view';
 import { defaultVimConfig, type VimConfig, type VimMapping } from './config.ts';
 import { createMappingInstaller } from './mappings.ts';
 import {
+  createVimLeaderExtension,
+  vimLeaderSuppressedByMappings,
+  type VimLeaderExtensionOptions,
+} from './leader.ts';
+import {
   cancelTransientInput,
   captureVimAdapter,
   getVimPublicState,
@@ -27,6 +32,11 @@ export interface VimExtensionOptions {
    * document/tab before starting its asynchronous save.
    */
   onWrite?: VimWriteHandler;
+  /**
+   * Route Crumb leader commands into the application's existing actions. Omit
+   * to leave Space as the engine's normal right-motion.
+   */
+  leader?: VimLeaderExtensionOptions;
 }
 
 export interface VimWriteParameters {
@@ -144,6 +154,11 @@ export function createVimExtension(
   const hasExplicitNormalY = config.mappings.some(mapping =>
     mapping.lhs === 'Y' && mapping.modes.includes('normal'),
   );
+  // An explicitly configured non-insert Space mapping keeps Vim ownership.
+  // Otherwise the leader handles Space before the engine's right-motion default.
+  const leader = options.leader && !vimLeaderSuppressedByMappings(resolvedConfig.mappings)
+    ? createVimLeaderExtension(options.leader)
+    : null;
   const mappings = createMappingInstaller(resolvedConfig, {
     // These are the package's public keymap entry points. The registry above
     // makes repeated installs reference-counted instead of stacking mappings.
@@ -181,7 +196,11 @@ export function createVimExtension(
   const marks = new Map<string, VimDocumentMarks>();
 
   return {
-    extension: [vim({ status: false }), adapterLifecyclePlugin],
+    extension: [
+      ...(leader ? [leader] : []),
+      vim({ status: false }),
+      adapterLifecyclePlugin,
+    ],
     installMappings: mappings.installMappings,
     removeMappings: mappings.removeMappings,
     getState: getVimPublicState,

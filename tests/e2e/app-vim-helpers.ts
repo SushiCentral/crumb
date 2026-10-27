@@ -13,6 +13,8 @@ export interface AppStubOptions {
   openQueue?: string[];
   files?: Record<string, string>;
   saveResult?: string | null;
+  /** Emulate another platform before CodeMirror reads navigator.platform. */
+  platform?: string;
 }
 
 export interface StubWrite {
@@ -35,6 +37,9 @@ export interface StubSnapshot {
 
 export async function openApp(page: Page, options: AppStubOptions = {}): Promise<void> {
   await page.addInitScript((opts) => {
+    if (opts.platform) {
+      Object.defineProperty(navigator, 'platform', { configurable: true, get: () => opts.platform! });
+    }
     try {
       localStorage.setItem('crumb.vimModeEnabled', String(Boolean(opts.vim)));
     } catch {

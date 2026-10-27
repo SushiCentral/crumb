@@ -14,6 +14,10 @@ const TERMINAL_KEYS = [
   { key: 'Control+b', label: 'Ctrl-B', data: '\u0002' },
   { key: 'Control+n', label: 'Ctrl-N', data: '\u000e' },
   { key: 'Control+p', label: 'Ctrl-P', data: '\u0010' },
+  { key: 'Control+h', label: 'Ctrl-H', data: '\u0008' },
+  { key: 'Control+j', label: 'Ctrl-J', data: '\n' },
+  { key: 'Control+k', label: 'Ctrl-K', data: '\u000b' },
+  { key: 'Control+l', label: 'Ctrl-L', data: '\u000c' },
 ];
 
 async function focusTerminal(page: Page): Promise<void> {
@@ -70,15 +74,16 @@ test.describe('terminal focus owns its Ctrl bindings', () => {
   }
 });
 
-test('Ctrl-J closes the terminal even when terminal input is focused', async ({ page }) => {
+test('Ctrl-` closes the terminal even when terminal input is focused', async ({ page }) => {
   await openApp(page, { vim: true });
   await newFile(page);
   await focusTerminal(page);
 
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+Backquote');
 
   await expect(page.locator('.bottom-panel-container')).toBeHidden();
   expect((await appStub(page)).ptyInput.join('')).not.toContain('\n');
+  await expect(page.locator('.cm-content')).toBeFocused();
 });
 
 test('terminal focus keeps global Ctrl-Shift-P and Ctrl-S shortcuts', async ({ page }) => {
@@ -172,7 +177,10 @@ test.describe('ordinary text input focus owns conflicting Ctrl bindings', () => 
     { key: 'Control+b', label: 'Ctrl-B' },
     { key: 'Control+n', label: 'Ctrl-N' },
     { key: 'Control+p', label: 'Ctrl-P' },
+    { key: 'Control+h', label: 'Ctrl-H' },
     { key: 'Control+j', label: 'Ctrl-J' },
+    { key: 'Control+k', label: 'Ctrl-K' },
+    { key: 'Control+l', label: 'Ctrl-L' },
   ];
 
   for (const { key, label } of CONFLICTING_KEYS) {
@@ -180,7 +188,7 @@ test.describe('ordinary text input focus owns conflicting Ctrl bindings', () => 
       await openApp(page, { vim: true });
       await newFile(page);
       // Open the terminal first so the assertion below proves Ctrl-J did not
-      // close an already-visible panel.
+      // close an already-visible panel and the other keys did not toggle it.
       await page.keyboard.press('Control+Backquote');
       await expect(page.locator('.bottom-panel-container')).toBeVisible();
       await focusEditor(page);
@@ -223,6 +231,83 @@ test.describe('ordinary text input focus owns conflicting Ctrl bindings', () => 
     await expect(page.locator('.command-palette')).toBeVisible();
     await expect(page.getByRole('combobox', { name: 'Search commands' })).toBeFocused();
   });
+});
+
+test.describe('editor shortcuts reserve Ctrl-H/J/K/L', () => {
+  test('macOS CodeMirror Emacs defaults for Ctrl-H/K/L are swallowed', async ({ page }) => {
+    await openApp(page, { vim: false, platform: 'MacIntel' });
+    await newFile(page);
+    await focusEditor(page);
+    await page.keyboard.type('abc');
+    const line = page.locator('.cm-line').first();
+    await expect(line).toHaveText('abc');
+
+    // On macOS CodeMirror maps Ctrl-H to deleteCharBackward and Ctrl-K to
+    // deleteToLineEnd by default. Neither may edit a Crumb document.
+    await page.keyboard.press('Control+h');
+    await expect(line).toHaveText('abc');
+
+    await page.keyboard.press('Home');
+    await page.keyboard.press('Control+k');
+    await expect(line).toHaveText('abc');
+
+    // Ctrl-L would selectLine on macOS.
+    await page.keyboard.press('Control+l');
+    await expect(page.locator('.status-bar')).not.toContainText('Sel:');
+
+    // Ctrl-J must not toggle the bottom panel either.
+    await page.keyboard.press('Control+j');
+    await expect(page.locator('.bottom-panel-container')).toBeHidden();
+  });
+
+  test('Ctrl-J does not move the focused Vim cursor', async ({ page }) => {
+    await openApp(page, {
+      vim: true,
+      openQueue: ['/tmp/ctrl-j-vim.ts'],
+      files: { '/tmp/ctrl-j-vim.ts': 'one\ntwo\n' },
+    });
+    await openFileViaShortcut(page, '/tmp/ctrl-j-vim.ts');
+    await focusEditor(page);
+    await page.keyboard.type('gg');
+    await expect(page.locator('.status-bar')).toContainText('Ln 1');
+
+    await page.keyboard.press('Control+j');
+
+    await expect(page.locator('.status-bar')).toContainText('Ln 1');
+    await expect(page.locator('.cm-line').first()).toHaveText('one');
+    await expect(page.locator('.bottom-panel-container')).toBeHidden();
+  });
+});
+
+test('ordinary text inputs receive Ctrl-H/J/K/L without Crumb prevention', async ({ page }) => {
+  await openApp(page, { vim: true });
+  await newFile(page);
+  await focusQuickOpen(page);
+  await page.evaluate(() => {
+    const events: Array<{ key: string; defaultPrevented: boolean }> = [];
+    (window as unknown as Record<string, unknown>).__inputCtrlEvents = events;
+    window.addEventListener('keydown', event => {
+      const key = event.key.toLowerCase();
+      if (event.ctrlKey && ['h', 'j', 'k', 'l'].includes(key)) {
+        events.push({ key, defaultPrevented: event.defaultPrevented });
+      }
+    });
+  });
+
+  for (const key of ['h', 'j', 'k', 'l']) {
+    await page.keyboard.press(`Control+${key}`);
+  }
+
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as Record<string, Array<{ key: string; defaultPrevented: boolean }>>
+  ).__inputCtrlEvents)).toEqual([
+    { key: 'h', defaultPrevented: false },
+    { key: 'j', defaultPrevented: false },
+    { key: 'k', defaultPrevented: false },
+    { key: 'l', defaultPrevented: false },
+  ]);
+  await expect(page.getByRole('combobox', { name: 'Search files' })).toBeFocused();
+  await expect(page.locator('.editor-tab')).toHaveCount(1);
 });
 
 test('a focused Vim editor keeps Ctrl-W/O out of App actions and Ctrl-N creates a tab', async ({ page }) => {

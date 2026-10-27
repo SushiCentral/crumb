@@ -62,9 +62,10 @@ npm run tauri:dev
 - `Ctrl/Cmd + W` — Close the current tab (prompts for unsaved changes)
 - `Ctrl/Cmd + Tab` — Switch tabs (`Shift` goes backward)
 - `Ctrl/Cmd + B` — Toggle file explorer sidebar
-- `Ctrl/Cmd + J` — Toggle bottom panel (terminal / output / problems)
-- `Ctrl + \`` — Open and focus the terminal; press again to return to the editor
+- `Ctrl + \`` — Toggle the bottom panel; opening selects Terminal and focuses its input, closing returns to the editor
 - `Ctrl/Cmd + Shift + P` — Open the command palette
+
+`Ctrl+H`, `Ctrl+J`, `Ctrl+K`, and `Ctrl+L` are not Crumb or editor shortcuts. They are left to focused terminals and ordinary text inputs, and are swallowed in the editor so CodeMirror/Vim defaults cannot edit or navigate the document.
 
 ## Themes and commands
 

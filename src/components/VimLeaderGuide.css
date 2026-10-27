@@ -1,0 +1,134 @@
+.vim-leader-guide {
+  position: absolute;
+  z-index: 8;
+  top: 8px;
+  right: 12px;
+  width: min(278px, calc(100% - 24px));
+  padding: 9px 11px 10px;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-left: 2px solid var(--accent);
+  border-radius: 0 0 8px 8px;
+  background: color-mix(in srgb, var(--panel) 96%, var(--editor));
+  color: var(--text);
+  box-shadow: 0 8px 22px color-mix(in srgb, #000 16%, transparent);
+  font: 12px/1.4 var(--ui-font);
+  pointer-events: none;
+  user-select: none;
+  animation: vim-guide-reveal 120ms cubic-bezier(.2, .75, .25, 1) both;
+}
+
+.vim-leader-guide-context {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  margin: 0 0 7px 1px;
+}
+
+.vim-leader-guide-context-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.vim-leader-guide-context-divider {
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.vim-leader-guide-context kbd,
+.vim-leader-guide-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 21px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--selection) 66%, var(--surface));
+  color: var(--label-active, var(--text));
+  font: 500 11px/1.2 var(--code-font, var(--ui-font));
+  white-space: nowrap;
+}
+
+.vim-leader-guide-next {
+  margin-left: auto;
+  color: var(--subtle);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .1em;
+}
+
+.vim-leader-guide-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 13px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vim-leader-guide-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 25px;
+}
+
+.vim-leader-guide-key {
+  flex: none;
+  min-width: 23px;
+  background: var(--surface);
+  color: var(--label-detail, var(--muted));
+  box-shadow: inset 0 -1px color-mix(in srgb, var(--border) 75%, transparent);
+}
+
+.vim-leader-guide-action {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.vim-leader-guide-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: -2px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.vim-leader-guide-branch > span {
+  font-size: 16px;
+  line-height: .8;
+}
+
+@keyframes vim-guide-reveal {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 360px) {
+  .vim-leader-guide {
+    right: 8px;
+    width: min(236px, calc(100% - 16px));
+    padding: 8px 9px;
+  }
+
+  .vim-leader-guide-list {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+
+  .vim-leader-guide-row { min-height: 23px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vim-leader-guide { animation: none; }
+}

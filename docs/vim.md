@@ -35,9 +35,25 @@ When Vim is enabled and the editor is focused, Vim receives its supported
 conflicting Ctrl bindings before Crumb's capture-phase shortcuts. `Ctrl-W`
 never closes a Crumb tab in that context. Settings, command palette, dialogs,
 terminal input, and ordinary text inputs retain their own keyboard handling.
-On macOS, Command shortcuts remain application shortcuts unless an explicit Vim
-mapping owns the key. Space is an ordinary Vim motion; there is no leader
-namespace in this milestone.
+`Ctrl-H`, `Ctrl-J`, `Ctrl-K`, and `Ctrl-L` are reserved surface keys: Crumb and
+the editor do not bind them and CodeMirror's macOS Emacs defaults and the Vim
+engine's Ctrl motions do not act on them. Terminals and native text inputs still
+receive those keys unchanged. On macOS, Command shortcuts remain application
+shortcuts unless an explicit Vim mapping owns the key. In Normal and Visual
+modes, Space starts Crumb's leader sequences instead of moving right. An
+incomplete sequence expires after 10000 ms; the leader guide appears if the
+sequence is still incomplete 500 ms after the initial Space, then filters as
+later prefix keys arrive. The guide delay is started by the initial Space and is
+not restarted by later keys. Space remains ordinary text in Insert mode and
+remains a Vim motion when an operator, count, or register prefix is already
+pending.
+
+The initial leader actions are:
+
+- `Space Space` opens the command palette.
+- `Space E` or `Space e` toggles the file tree.
+- `Space /` opens Search.
+- `Space f f` opens Quick Open.
 
 ## Typed configuration
 
@@ -229,8 +245,8 @@ The following are not part of this milestone:
   `:wq`, `:e`, and other host-affecting Ex commands.
 - Vim windows, tabs, folds, terminal commands, tag objects, and
   language-semantic text objects.
-- Space leader mappings, a dedicated Vim settings panel, and configurable
-  app-versus-Vim shortcut precedence.
+- A dedicated Vim settings panel and configurable app-versus-Vim shortcut
+  precedence.
 - Full Vim/Neovim regex parity, `*` register parity, implicit unnamed-clipboard
   synchronization, and `Ctrl-O/I` jump-list parity unless separately proven by
   the package lifecycle tests.

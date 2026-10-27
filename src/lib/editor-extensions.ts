@@ -9,7 +9,30 @@ import type { EditorPreferences } from './preferences.ts';
 
 // The invariant parts of basicSetup stay outside the preferences compartment:
 // toggling a display option must never discard undo history or search state.
+//
+// Ctrl-H/J/K/L are reserved surface keys, not editing commands. On macOS
+// CodeMirror's default keymap turns Ctrl-H/K/L into Emacs editing commands, and
+// the Vim engine maps them to buffer motions. A highest-precedence no-op keymap
+// consumes them before either keymap can act so the editor never treats them as
+// shortcuts. Terminals and native inputs are outside CodeMirror and unaffected.
+export const EDITOR_RESERVED_CTRL_KEYS: ReadonlySet<string> = new Set(['h', 'j', 'k', 'l']);
+
+export function isEditorReservedCtrlKey(
+  event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>,
+): boolean {
+  return event.ctrlKey
+    && !event.metaKey
+    && !event.altKey
+    && !event.shiftKey
+    && EDITOR_RESERVED_CTRL_KEYS.has(event.key.toLowerCase());
+}
+
+const editorReservedCtrlKeys: Extension = Prec.highest(keymap.of(
+  [...EDITOR_RESERVED_CTRL_KEYS].map(key => ({ key: `Ctrl-${key}`, run: () => true })),
+));
+
 export const editorCoreExtensions: Extension = [
+  editorReservedCtrlKeys,
   highlightSpecialChars(), history(), foldGutter(), drawSelection(), dropCursor(),
   EditorState.allowMultipleSelections.of(true), indentOnInput(),
   syntaxHighlighting(defaultHighlightStyle, { fallback: true }),

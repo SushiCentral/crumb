@@ -24,7 +24,7 @@ function shortcut(overrides: Partial<VimShortcutInput> = {}): boolean {
 }
 
 test('Vim owns conflicting Ctrl bindings only while enabled in a focused editor', () => {
-  for (const key of ['w', 'o', 'b', 'j']) {
+  for (const key of ['w', 'o', 'b']) {
     assert.equal(shortcut({ key }), true, `Ctrl-${key} should belong to Vim`);
   }
 
@@ -51,7 +51,7 @@ test('Vim owns the Ctrl conflicts in Normal, Insert, Replace, and Visual modes',
 });
 
 test('unsupported or modified Ctrl combinations remain application shortcuts', () => {
-  for (const key of ['s', 'f', 'c', 'x', 'n', 'p', 'Tab', ',', '`']) {
+  for (const key of ['s', 'f', 'c', 'x', 'n', 'p', 'h', 'j', 'k', 'l', 'Tab', ',', '`']) {
     assert.equal(shortcut({ key }), false, `Ctrl-${key} is not a supported Vim conflict`);
   }
 

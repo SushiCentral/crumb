@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { EditorView, keymap } from '@codemirror/view';
 import { Annotation, Compartment, EditorState, Prec, Transaction, type Extension } from '@codemirror/state';
 import { javascript } from '@codemirror/lang-javascript';
@@ -10,8 +10,10 @@ import { editorCoreExtensions, editorPreferenceExtensions, cursorInfo, type Curs
 import { attachScrollSync } from '../lib/scroll-sync';
 import { createVimExtension, type VimExtension, type VimPublicState } from '../lib/vim/extension';
 import { defaultVimConfig, type VimConfig } from '../lib/vim/config';
+import { isVimLeaderMode, type VimLeaderAction } from '../lib/vim/leader';
 import { shouldVimOwnTab } from '../lib/vim/shortcuts';
 import type { VimSession, VimSessionBinding } from '../lib/vim/session';
+import VimLeaderGuide from './VimLeaderGuide';
 
 interface EditorProps {
   paneId: string;
@@ -31,6 +33,8 @@ interface EditorProps {
   onChange?: (value: string) => void;
   /** Route an argumentless Vim `:w` to Crumb's existing save flow. */
   onSaveRequest?: (tabId: string) => void;
+  /** Route Space leader sequences into Crumb's existing application actions. */
+  onVimLeaderAction?: (action: VimLeaderAction) => void;
   onFocus?: () => void;
   /** Typed Vim mode/pending snapshot for the active application status bar. */
   onVimStateChange?: (paneId: string, state: VimPublicState) => void;
@@ -91,7 +95,7 @@ function editorAppearance(theme: Theme, fontSize: number, fontFamily: string) {
   }, { dark: theme.dark });
 }
 
-const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, vimSession, tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, preferences, vimConfig = defaultVimConfig, onChange, onCursorChange, onSaveRequest, onFocus, onVimStateChange }, ref) {
+const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, vimSession, tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, preferences, vimConfig = defaultVimConfig, onChange, onCursorChange, onSaveRequest, onVimLeaderAction, onFocus, onVimStateChange }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const statesRef = useRef(new Map<string, EditorState>());
@@ -100,9 +104,17 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
   const onCursorChangeRef = useRef(onCursorChange);
   const onVimStateChangeRef = useRef(onVimStateChange);
   const onSaveRequestRef = useRef(onSaveRequest);
+  const onVimLeaderActionRef = useRef(onVimLeaderAction);
   onCursorChangeRef.current = onCursorChange;
   onVimStateChangeRef.current = onVimStateChange;
   onSaveRequestRef.current = onSaveRequest;
+  onVimLeaderActionRef.current = onVimLeaderAction;
+
+  // The guide is pane-local React state. The Vim extension only forwards the
+  // visible prefix through this ref, so the overlay is a sibling of the
+  // CodeMirror mount element instead of a child that CodeMirror could replace.
+  const [leaderGuidePrefix, setLeaderGuidePrefix] = useState<readonly string[] | null>(null);
+  const leaderGuideChangeRef = useRef<(prefix: readonly string[] | null) => void>(setLeaderGuidePrefix);
 
   // Selection-only cursor reporting is coalesced to at most one callback per
   // animation frame. Repeated keydown navigation would otherwise re-render App
@@ -148,6 +160,14 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
   if (vimRef.current === null) {
     vimRef.current = createVimExtension(vimConfig, {
       onWrite: () => onSaveRequestRef.current?.(activeTabRef.current),
+      // Editor fixtures that do not wire application actions keep Space as
+      // the engine's normal right-motion.
+      leader: onVimLeaderActionRef.current
+        ? {
+          dispatch: action => onVimLeaderActionRef.current?.(action),
+          onGuideChange: prefix => leaderGuideChangeRef.current(prefix),
+        }
+        : undefined,
     });
   }
   const vim = vimRef.current;
@@ -188,6 +208,8 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
       // Mark characterwise Visual mode so its active fat-cursor cell can be
       // styled as part of the selected text, without affecting other modes.
       view.dom.classList.toggle('vim-visual-mode', state.mode === 'visual');
+      // A mode that cannot own the leader must not leave a stale overlay.
+      if (!isVimLeaderMode(state.mode)) setLeaderGuidePrefix(null);
       onVimStateChangeRef.current?.(paneId, state);
     });
   };
@@ -389,7 +411,6 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
   }, [doc, tabId]);
 
   return <div
-    ref={containerRef}
     onFocusCapture={event => {
       // Moving focus between the editor, Vim prompt, and panels inside this
       // pane is not an ownership transfer. Requesting focus again here would
@@ -409,8 +430,11 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
         vimSession.cancelFocusIntent(event.relatedTarget instanceof Node ? event.relatedTarget : null);
       }
     }}
-    style={{ height: '100%', width: '100%' }}
-  />;
+    style={{ position: 'relative', height: '100%', width: '100%' }}
+  >
+    <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
+    <VimLeaderGuide prefix={leaderGuidePrefix} />
+  </div>;
 });
 
 export default Editor;

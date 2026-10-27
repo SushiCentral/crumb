@@ -1,12 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import { appStub, openApp } from './app-vim-helpers';
+import { appStub, focusEditor, newFile, openApp } from './app-vim-helpers';
 
 /**
  * Regression coverage for terminal auto-open on project open.
  *
  * The terminal panel is an explicit surface: launching Crumb or opening and
  * switching projects must never reveal it, focus it, or spawn a PTY. Users
- * still control it through the normal toggle paths (Ctrl-` / Ctrl-J).
+ * still control it through the normal toggle path (Ctrl-`).
  */
 
 async function openProject(page: Page, rootName: string): Promise<void> {
@@ -71,10 +71,67 @@ test('switching projects does not add a terminal group when the terminal is open
   await expect.poll(async () => (await appStub(page)).spawnCalls).toBe(1);
 
   // Explicit close/reopen keeps the same live session and spawn count.
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+Backquote');
   await expect(page.locator('.bottom-panel-container')).toBeHidden();
   await page.keyboard.press('Control+Backquote');
   await expect(page.locator('.bottom-panel-container')).toBeVisible();
   await expect(page.locator('.terminal-sidebar .sidebar-item')).toHaveCount(1);
   await expect.poll(async () => (await appStub(page)).spawnCalls).toBe(1);
+});
+
+test('Ctrl-` opens on the Terminal tab and focuses its input', async ({ page }) => {
+  await openApp(page, { vim: false });
+  await newFile(page);
+  await focusEditor(page);
+
+  await page.keyboard.press('Control+Backquote');
+  await expect(page.locator('.bottom-panel-container')).toBeVisible();
+  await expect(page.locator('.tab-btn.active')).toHaveText('Terminal');
+  await expect(page.locator('.xterm-helper-textarea').first()).toBeFocused();
+
+  // A user can inspect Output while the panel stays open. Toggling the panel
+  // closed and back open must restore the Terminal tab and its input focus.
+  await page.getByRole('button', { name: 'Output', exact: true }).click();
+  await expect(page.locator('.tab-btn.active')).toHaveText('Output');
+  await page.keyboard.press('Control+Backquote');
+  await expect(page.locator('.bottom-panel-container')).toBeHidden();
+
+  await page.keyboard.press('Control+Backquote');
+  await expect(page.locator('.bottom-panel-container')).toBeVisible();
+  await expect(page.locator('.tab-btn.active')).toHaveText('Terminal');
+  await expect(page.locator('.xterm-helper-textarea').first()).toBeFocused();
+});
+
+test('Ctrl-` closes an open panel and returns focus to the active editor', async ({ page }) => {
+  await openApp(page, { vim: false });
+  await newFile(page);
+  await focusEditor(page);
+
+  await page.keyboard.press('Control+Backquote');
+  await expect(page.locator('.bottom-panel-container')).toBeVisible();
+  await expect(page.locator('.xterm-helper-textarea').first()).toBeFocused();
+
+  await page.keyboard.press('Control+Backquote');
+  await expect(page.locator('.bottom-panel-container')).toBeHidden();
+  await expect(page.locator('.cm-content')).toBeFocused();
+});
+
+test('Ctrl-J no longer toggles the bottom panel', async ({ page }) => {
+  await openApp(page, { vim: false });
+  await newFile(page);
+  await focusEditor(page);
+
+  await page.keyboard.press('Control+j');
+  await expect(page.locator('.bottom-panel-container')).toBeHidden();
+  await expect(page.locator('.xterm')).toHaveCount(0);
+  expect((await appStub(page)).spawnCalls).toBe(0);
+
+  await page.keyboard.press('Control+Backquote');
+  await expect(page.locator('.bottom-panel-container')).toBeVisible();
+  await expect(page.locator('.xterm-helper-textarea').first()).toBeFocused();
+
+  await page.keyboard.press('Control+j');
+  await expect(page.locator('.bottom-panel-container')).toBeVisible();
+  // Ctrl-J reaches the shell as a line feed; it is no longer consumed by Crumb.
+  await expect.poll(async () => (await appStub(page)).ptyInput.join('')).toContain('\n');
 });
