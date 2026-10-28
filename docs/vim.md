@@ -295,6 +295,23 @@ Other package-specific differences:
 - Closed documents are pruned. Positions are clamped after edits, not tracked
   through text changes. Cross-file `''`/double-backtick navigation is not added.
 
+## Held navigation keys and scroll margins
+
+Holding `j`/`k`/`h`/`l` or an arrow key moves continuously and stops as soon as
+the key is released. Keystrokes are never filtered or rate-limited: the editor
+processes every one. What made movement continue after release was the status
+bar's cursor snapshot: publishing it on an animation frame re-rendered the whole
+window during a hold, starving the input queue so keydowns were handled after
+the keyup. Crumb now publishes that snapshot only after movement has been quiet
+for 120 ms (`CURSOR_STATUS_IDLE_MS`). Document edits, tab switches and mounts
+still report synchronously.
+
+The editor keeps three lines of context above and below the cursor
+(`EditorView.cursorScrollMargin`, `CURSOR_SCROLL_MARGIN_LINES`), so the view
+starts scrolling before the cursor reaches the last visible line, as in VS Code.
+This applies to Vim motions and native arrow keys alike and is reconfigured with
+the editor font size.
+
 The new jump history supersedes the deferred Ctrl-O/I statements in the original
 milestone matrix above. Unit coverage and authored browser regression tests are
 separate evidence: the new browser specs have not been executed under the

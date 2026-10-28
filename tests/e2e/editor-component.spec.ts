@@ -159,17 +159,18 @@ test('Vim is off by default and ordinary typing is unchanged', async ({ page }) 
   await expectState(page, { doc: 'iabc', mode: 'inactive' });
 });
 
-test('repeated selection updates coalesce into one cursor report per frame', async ({ page }) => {
+test('repeated selection updates coalesce into one cursor report after the burst', async ({ page }) => {
   await openEditor(page, { a: 'alpha beta gamma\ndelta epsilon' });
 
   // Let the mount/click cursor report settle so the baseline is stable.
   await page.evaluate(() => new Promise<void>(resolve => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    setTimeout(resolve, 200);
   }));
   const before = await state(page);
 
   // Three synchronous selection transactions in one task mimic repeated
-  // keydown cursor moves arriving faster than the app can render.
+  // keydown cursor moves. Selection-only reporting is debounced until movement
+  // stops, so the whole burst must produce a single status-bar update.
   await page.evaluate(() => {
     (window as unknown as Record<string, any>).__crumbEditor.dispatchSelections([1, 5, 11]);
   });

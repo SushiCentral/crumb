@@ -3,7 +3,16 @@ import assert from 'node:assert/strict';
 import { EditorState, Compartment } from '@codemirror/state';
 import { indentUnit } from '@codemirror/language';
 import { indentMore, undo, undoDepth } from '@codemirror/commands';
-import { editorCoreExtensions, editorPreferenceExtensions, cursorInfo, isEditorReservedCtrlKey } from '../src/lib/editor-extensions.ts';
+import { EditorView } from '@codemirror/view';
+import {
+  editorCoreExtensions,
+  editorPreferenceExtensions,
+  cursorInfo,
+  isEditorReservedCtrlKey,
+  cursorScrollMarginForFontSize,
+  CURSOR_SCROLL_MARGIN_LINES,
+  EDITOR_LINE_HEIGHT,
+} from '../src/lib/editor-extensions.ts';
 import { defaultEditorPreferences } from '../src/lib/preferences.ts';
 import { createVimExtension } from '../src/lib/vim/extension.ts';
 
@@ -26,6 +35,30 @@ test('indent widths and spaces/tabs affect real indentation commands', () => {
     indentMore({ state, dispatch: transaction => { state = transaction.state; } });
     assert.equal(state.doc.toString(), (mode === 'tabs' ? '\t' : ' '.repeat(size)) + 'hello');
   }
+});
+
+test('cursor scrolling keeps three lines of context above and below', () => {
+  assert.equal(CURSOR_SCROLL_MARGIN_LINES, 3);
+  assert.equal(EDITOR_LINE_HEIGHT, 1.5);
+
+  const margin = (fontSize: number) => EditorState.create({
+    extensions: [cursorScrollMarginForFontSize(fontSize)],
+  }).facet(EditorView.cursorScrollMargin);
+
+  assert.deepEqual(margin(13), { x: 5, y: 59 });
+  assert.deepEqual(margin(20), { x: 5, y: 90 });
+  // Invalid sizes fall back to CodeMirror's own 5px default on both axes.
+  assert.deepEqual(margin(0), { x: 5, y: 5 });
+  assert.deepEqual(margin(Number.NaN), { x: 5, y: 5 });
+  assert.deepEqual(margin(Number.POSITIVE_INFINITY), { x: 5, y: 5 });
+  assert.deepEqual(EditorState.create({}).facet(EditorView.cursorScrollMargin), { x: 5, y: 5 });
+});
+
+test('the scroll margin arrives with the appearance, not the editor core', () => {
+  const core = EditorState.create({ extensions: [editorCoreExtensions] });
+  // The core keeps CodeMirror's default; the theme/appearance compartment is
+  // what knows the font size and therefore the line height.
+  assert.deepEqual(core.facet(EditorView.cursorScrollMargin), { x: 5, y: 5 });
 });
 
 test('cursor information reports 1-based positions, visual tab columns, and selected characters', () => {

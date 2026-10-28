@@ -6,7 +6,15 @@ import { createSyntaxHighlighting } from '../lib/highlight';
 import { languageForPath } from '../lib/languages';
 import type { Theme } from '../lib/themes';
 import type { EditorPreferences } from '../lib/preferences';
-import { editorCoreExtensions, editorPreferenceExtensions, cursorInfo, type CursorInfo } from '../lib/editor-extensions';
+import {
+  editorCoreExtensions,
+  editorPreferenceExtensions,
+  cursorInfo,
+  cursorScrollMarginForFontSize,
+  EDITOR_LINE_HEIGHT,
+  type CursorInfo,
+} from '../lib/editor-extensions';
+import { createCursorReporter, type CursorReporter } from '../lib/cursor-report';
 import { attachScrollSync } from '../lib/scroll-sync';
 import { createVimExtension, type VimExtension, type VimPublicState } from '../lib/vim/extension';
 import { defaultVimConfig, type VimConfig } from '../lib/vim/config';
@@ -67,13 +75,13 @@ const appearanceCompartment = new Compartment();
 const preferencesCompartment = new Compartment();
 
 function editorAppearance(theme: Theme, fontSize: number, fontFamily: string) {
-  return EditorView.theme({
+  const themeExtension = EditorView.theme({
     '&': {
       backgroundColor: 'var(--editor)',
       color: 'var(--text)',
       fontFamily: `'${fontFamily}', monospace`,
       fontSize: `${fontSize}px`,
-      lineHeight: '1.5',
+      lineHeight: String(EDITOR_LINE_HEIGHT),
     },
     '.cm-content': { padding: '10px 0' },
     '.cm-line': { padding: '0 16px' },
@@ -113,6 +121,9 @@ function editorAppearance(theme: Theme, fontSize: number, fontFamily: string) {
     '.cm-scroller::-webkit-scrollbar': { width: '7px', height: '7px' },
     '.cm-scroller::-webkit-scrollbar-thumb': { background: 'var(--surface)', borderRadius: '4px' },
   }, { dark: theme.dark });
+  // The scroll margin is static, so it is reconfigured with the appearance
+  // whenever the font size changes.
+  return [themeExtension, cursorScrollMarginForFontSize(fontSize)];
 }
 
 const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, vimSession, tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, preferences, vimConfig = defaultVimConfig, onChange, onCursorChange, onSaveRequest, onVimLeaderAction, onExQuitRequest, onExWriteQuitRequest, onFocus, onVimStateChange }, ref) {
@@ -140,40 +151,17 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
   const [leaderGuidePrefix, setLeaderGuidePrefix] = useState<readonly string[] | null>(null);
   const leaderGuideChangeRef = useRef<(prefix: readonly string[] | null) => void>(setLeaderGuidePrefix);
 
-  // Selection-only cursor reporting is coalesced to at most one callback per
-  // animation frame. Repeated keydown navigation would otherwise re-render App
-  // for every intermediate cursor position. Only the latest cursor is retained;
-  // the frame callback flushes it once the current navigation burst settles.
-  // Doc edits and lifecycle reports stay synchronous so consumers never read a
-  // cursor from before a committed change.
-  const cursorFrameRef = useRef<number | null>(null);
-  const pendingCursorRef = useRef<CursorInfo | null>(null);
-
-  const cancelCursorChange = () => {
-    if (cursorFrameRef.current !== null) {
-      cancelAnimationFrame(cursorFrameRef.current);
-      cursorFrameRef.current = null;
-    }
-    pendingCursorRef.current = null;
-  };
-
-  const reportCursorNow = (state: EditorState) => {
-    // A synchronous report supersedes any deferred selection-only report, so a
-    // later frame cannot overwrite it with a stale cursor.
-    cancelCursorChange();
-    onCursorChangeRef.current?.(cursorInfo(state));
-  };
-
-  const scheduleCursorChange = (state: EditorState) => {
-    pendingCursorRef.current = cursorInfo(state);
-    if (cursorFrameRef.current !== null) return;
-    cursorFrameRef.current = requestAnimationFrame(() => {
-      cursorFrameRef.current = null;
-      const cursor = pendingCursorRef.current;
-      pendingCursorRef.current = null;
-      if (cursor) onCursorChangeRef.current?.(cursor);
-    });
-  };
+  // Selection-only cursor reporting waits until movement stops (see
+  // `cursor-report.ts`). Publishing once per animation frame re-rendered the
+  // whole App during a held navigation key, which starved the input queue and
+  // kept the cursor moving after release. Doc edits, mounts and tab switches
+  // report synchronously so consumers never read a cursor from before a change.
+  const reporterRef = useRef<CursorReporter | null>(null);
+  if (reporterRef.current === null) {
+    reporterRef.current = createCursorReporter(cursor => onCursorChangeRef.current?.(cursor));
+  }
+  const reporter = reporterRef.current;
+  const reportCursorNow = (state: EditorState) => reporter.reportNow(cursorInfo(state));
 
   // One extension instance per Editor. Engine mappings and registers remain
   // global; the mapping installer is reference-counted across distinct
@@ -231,9 +219,20 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
   const vimBindingRef = useRef<VimSessionBinding | null>(null);
   const vimStateSubscriptionRef = useRef<(() => void) | null>(null);
 
+  // The engine signals on every keypress and command completion. Only forward
+  // snapshots that actually changed, so plain navigation never schedules React
+  // work (the status bar would otherwise re-render the App per key).
+  const lastVimStateRef = useRef<VimPublicState | null>(null);
+  const publishVimState = (state: VimPublicState) => {
+    const previous = lastVimStateRef.current;
+    if (previous?.mode === state.mode && previous?.pending === state.pending) return;
+    lastVimStateRef.current = state;
+    onVimStateChangeRef.current?.(paneId, state);
+  };
+
   const reportVimState = () => {
     const view = viewRef.current;
-    if (view) onVimStateChangeRef.current?.(paneId, vim.getState(view));
+    if (view) publishVimState(vim.getState(view));
   };
 
   const subscribeVimState = () => {
@@ -247,7 +246,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
       view.dom.classList.toggle('vim-visual-mode', state.mode === 'visual');
       // A mode that cannot own the leader must not leave a stale overlay.
       if (!isVimLeaderMode(state.mode)) setLeaderGuidePrefix(null);
-      onVimStateChangeRef.current?.(paneId, state);
+      publishVimState(state);
     });
   };
 
@@ -299,7 +298,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
       appearanceCompartment.of(editorAppearance(currentTheme, currentFontSize, fontFamily)),
       EditorView.updateListener.of(update => {
         if (update.docChanged) reportCursorNow(update.state);
-        else if (update.selectionSet) scheduleCursorChange(update.state);
+        else if (update.selectionSet) reporter.reportLater(cursorInfo(update.state));
         if (!update.docChanged) return;
         statesRef.current.set(activeTabRef.current, update.state);
         const external = update.transactions.some(transaction => transaction.annotation(externalDocUpdate));
@@ -329,7 +328,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
     return () => {
       // Finalize/restore session state while the adapter is still alive; the
       // session, not an individual pane, decides when a document has closed.
-      cancelCursorChange();
+      reporter.cancel();
       vimStateSubscriptionRef.current?.();
       vimStateSubscriptionRef.current = null;
       vimBindingRef.current?.detach();
