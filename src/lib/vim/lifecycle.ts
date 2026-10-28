@@ -66,6 +66,36 @@ interface VimHostAdapter extends CodeMirror {
  */
 const adapterHandlers = new WeakMap<EditorView, VimAdapterHandlers>();
 
+/**
+ * Transient editor prompts register a pre-capture restore hook here. Session
+ * transitions call it before canceling engine input, so preview-only selection
+ * changes never become the saved session state.
+ */
+const capturePreflights = new WeakMap<EditorView, () => void>();
+
+export function registerVimCapturePreflight(view: EditorView, preflight: () => void): () => void {
+  capturePreflights.set(view, preflight);
+  return () => {
+    if (capturePreflights.get(view) === preflight) capturePreflights.delete(view);
+  };
+}
+
+export function runVimCapturePreflight(view: EditorView): void {
+  capturePreflights.get(view)?.();
+}
+
+/** Record exactly one jump-list departure without recording a document edit. */
+export function recordVimJump(view: EditorView, from: VimJumpPoint, to: VimJumpPoint): void {
+  const cm = getCM(view);
+  if (!cm) return;
+  const jumpList = Vim.getVimGlobalState_().jumpList;
+  jumpList.add(
+    cm as unknown as Parameters<typeof jumpList.add>[0],
+    { line: from.line, ch: from.ch },
+    { line: to.line, ch: to.ch },
+  );
+}
+
 /** Plain engine positions. The bridge never stores adapter-bound markers. */
 export interface VimJumpPoint {
   line: number;
@@ -601,6 +631,58 @@ export function getVimGoalColumn(view: EditorView): number | 'eol' | undefined {
 }
 
 /**
+ * Read the semantic Vim cursor for session departure sampling.
+ *
+ * In charwise Visual mode CodeMirror's primary selection head is exclusive
+ * (one character past the Vim head), while Vim's `sel.head` is the inclusive
+ * character under the cursor. Linewise/blockwise Visual also keep the semantic
+ * head in `vim.sel.head`. Outside Visual mode the adapter cursor is exact.
+ */
+export function getVimSemanticCursor(view: EditorView): VimJumpPoint | null {
+  const cm = getCM(view);
+  const vim = cm?.state.vim;
+  if (!cm || !vim) return null;
+  const position = vim.visualMode && vim.sel ? vim.sel.head : cm.getCursor();
+  return { line: position.line, ch: position.ch };
+}
+
+export interface VimGoalSnapshot {
+  readonly column: number | 'eol' | undefined;
+  readonly lastHPos: number;
+}
+
+/** Capture the engine's goal cache without changing cursor/selection state. */
+export function captureVimGoal(view: EditorView): VimGoalSnapshot | null {
+  const cm = getCM(view);
+  const vim = cm?.state.vim;
+  if (!cm || !vim) return null;
+  return {
+    column: vimGoalColumns.get(cm),
+    lastHPos: typeof vim.lastHPos === 'number' ? vim.lastHPos : -1,
+  };
+}
+
+/** Restore a captured goal after a transient motion that must not pollute it. */
+export function restoreVimGoal(view: EditorView, snapshot: VimGoalSnapshot | null): void {
+  if (!snapshot) return;
+  const cm = getCM(view);
+  const vim = cm?.state.vim;
+  if (!cm || !vim) return;
+  if (snapshot.column === undefined) vimGoalColumns.delete(cm);
+  else vimGoalColumns.set(cm, snapshot.column);
+  vim.lastHPos = snapshot.lastHPos;
+}
+
+/** Set the genuine landing goal after a committed Flash jump. */
+export function setVimGoalColumn(view: EditorView, column: number | 'eol'): void {
+  const cm = getCM(view);
+  const vim = cm?.state.vim;
+  if (!cm || !vim) return;
+  vimGoalColumns.set(cm, column);
+  vim.lastHPos = column === 'eol' ? Infinity : column;
+}
+
+/**
  * Track host mouse selection without leaving a listener/timer behind when the
  * Vim adapter is destroyed or recreated on the same EditorView.
  */
@@ -1070,6 +1152,7 @@ export function cancelTransientInput(view: EditorView): void {
  * must keep them opaque and never serialize them.
  */
 export function captureVimAdapter(view: EditorView): VimAdapterCapture | null {
+  runVimCapturePreflight(view);
   cancelTransientInput(view);
 
   const vim = adapterVimState(view);

@@ -8,6 +8,7 @@ import { scaleShortcut, nextZoom } from './lib/scale-shortcuts';
 import { defaultSidebarWidth, readNumber, readBoolean, clampPanelHeight, clampSidebarWidth, readEditorPreferences, lineEnding } from './lib/preferences';
 import { createVimSession } from './lib/vim/session';
 import type { VimPublicState } from './lib/vim/extension';
+import type { VimFlashState } from './lib/vim/jump';
 import type { VimLeaderAction } from './lib/vim/leader';
 import { shouldVimOwnShortcut, type VimFocusedSurface } from './lib/vim/shortcuts';
 import { isEditorReservedCtrlKey, type CursorInfo } from './lib/editor-extensions';
@@ -175,6 +176,7 @@ export default function App() {
   const [clearPromptOnStart, setClearPromptOnStart] = useState(() => readBoolean(readPreference('crumb.terminalClearPrompt', ''), false));
   const [paneCursors, setPaneCursors] = useState<Record<string, CursorInfo>>({});
   const [paneVimStates, setPaneVimStates] = useState<Record<string, VimPublicState>>({});
+  const [paneFlashStates, setPaneFlashStates] = useState<Record<string, { tabId: string; state: VimFlashState }>>({});
 
   // Empty workspace state: start with 0 tabs so Welcome Screen is displayed first
   const [tabs, setTabs] = useState<EditorTab[]>([]);
@@ -247,6 +249,10 @@ export default function App() {
   const activeCursor = paneCursors[activePaneId] ?? paneCursors[panes.find(pane => pane.kind === 'editor' && pane.tabId === activeTabId)?.id ?? ''];
   const activeVimState = editorPreferences.vimModeEnabled ? paneVimStates[activePaneId] : undefined;
   const vimStatus = toStatusBarVimStatus(activeVimState);
+  const activeFlashEntry = paneFlashStates[activePaneId];
+  const flashStatus = editorPreferences.vimModeEnabled && activeFlashEntry?.tabId === activeTabId
+    ? activeFlashEntry.state
+    : undefined;
   const canPreviewMarkdown = activeTab ? isMarkdownPath(activeTab.path) : false;
   const isPreviewOpen = canPreviewMarkdown && panes.some(pane => pane.kind === 'preview' && pane.tabId === activeTab?.id);
 
@@ -311,6 +317,22 @@ export default function App() {
       const old = previous[paneId];
       return old?.mode === state.mode && old.pending === state.pending
         ? previous : { ...previous, [paneId]: state };
+    });
+  };
+
+  const reportFlashState = (paneId: string, tabId: string, state: VimFlashState | null) => {
+    setPaneFlashStates(previous => {
+      const old = previous[paneId];
+      if (state === null) {
+        if (!old || old.tabId !== tabId) return previous;
+        const next = { ...previous };
+        delete next[paneId];
+        return next;
+      }
+      if (old?.tabId === tabId && old.state.query === state.query && old.state.matchCount === state.matchCount) {
+        return previous;
+      }
+      return { ...previous, [paneId]: { tabId, state } };
     });
   };
 
@@ -1666,6 +1688,7 @@ export default function App() {
                           preferences={editorPreferences}
                           onCursorChange={cursor => reportCursor(pane.id, cursor)}
                           onVimStateChange={reportVimState}
+                          onFlashStateChange={reportFlashState}
                           onChange={value => handleEditorChange(file.id, value)}
                           onSaveRequest={tabId => { void handleSaveFile(tabId); }}
                           onVimLeaderAction={runVimLeaderAction}
@@ -1754,7 +1777,7 @@ export default function App() {
         <BottomPanel isOpen={isPanelOpen} clearPromptOnStart={clearPromptOnStart} onClose={() => setIsPanelOpen(false)} onActiveSessionChange={setActiveTerminalSessionId} theme={theme} fontSize={fontSize} fontFamily={codeFont} focusRequest={terminalFocusRequest} workingDirectory={explorerRootPath} />
       </div>
 
-      <StatusBar hasDocument={activeTab != null} cursor={activeCursor} vimStatus={vimStatus} preferences={editorPreferences} lineEnding={activeLineEnding} language={activeTab ? languageName(activeTab.path) : 'No file'} wordWrap={wordWrap} zoom={zoomLevel} theme={theme.name} />
+      <StatusBar hasDocument={activeTab != null} cursor={activeCursor} vimStatus={vimStatus} flashStatus={flashStatus} preferences={editorPreferences} lineEnding={activeLineEnding} language={activeTab ? languageName(activeTab.path) : 'No file'} wordWrap={wordWrap} zoom={zoomLevel} theme={theme.name} />
       {/* Settings Modal */}
       {isSettingsOpen && (
           <SettingsModal

@@ -72,6 +72,54 @@ The initial leader actions are:
 The guide identifies Files, Buffers, Search, and UI submenus with a **GROUP**
 badge. Entering a group shows its name and only the immediate next keys.
 
+## Viewport jump
+
+In Normal and Visual modes, `s` starts Crumb's Flash-inspired viewport jump
+instead of Vim's substitute command. Highlights, labels, and the current target
+update live as you type; there is no Enter gate. Flash uses its own literal
+`ignorecase` + `smartcase` policy (ordinary Crumb `/` search is unchanged).
+Choice keys are the full upstream home-row alphabet in lower and upper case
+(`asdfghjklqwertyuiopzxcvbnm` plus its uppercase form). Only lowercase labels
+are stable across refinements; uppercase labels are temporary spillover. Any
+label character immediately following any occurrence of the query anywhere in
+the document is excluded, using the same smartcase policy.
+
+- Candidate targets must start inside the usable text viewport, excluding the
+  sticky gutter. `visibleRanges` overscan does not spend labels. Labels refresh
+  on vertical/horizontal scroll and resize. Flat character-cell labels overlay
+  the cell immediately after each match on the same line, without shifting text.
+  Labels that would be clipped or overlap another label are hidden; their
+  matches stay highlighted and the current target remains reachable with Enter.
+- Labels nearest the activation cursor receive keys first. Matches beyond the
+  alphabet stay highlighted but unlabelled.
+- Enter jumps to the next match strictly after the activation cursor, wrapping
+  like upstream. A label jumps to that labelled match. Space remains query text
+  while the jump is active.
+- In Visual character, line, and block modes, the real Vim head is moved by a
+  native preview motion as the query changes, preserving the original anchor and
+  block geometry. Preview does not touch registers, repeat state, or the jump
+  list. A committed jump records exactly one departure for Ctrl-O.
+- Backspace recomputes matches, labels, highlights, and the preview. An empty
+  query remains active with no highlights. A nonempty query with no matches
+  exits Flash immediately, restores any Visual preview to the activation head,
+  keeps the pre-existing Visual type, and consumes the triggering key.
+- Escape restores the activation cursor and scroll view, exits Visual mode, and
+  clears the selection like upstream.
+- Blur, tab/pane transfer, and Vim disable restore a transient Visual preview
+  before session capture. External edits drop Flash without restoring stale
+  offsets. Mouse selection cancels Flash and keeps the new selection. Destroy
+  only removes resources and emits an inactive state.
+- There is no floating editor prompt chip. Crumb's UI can consume
+  `VimFlashState` through `onFlashStateChange({ query, matchCount })`; the
+  callback receives null on completion, cancellation, and teardown. A visually
+  hidden live region announces the same state without taking focus.
+- Highlights are plugin-owned transient decorations, so a cached EditorState
+  restored by a tab switch cannot bring stale matches back.
+- Explicit Normal or Visual `s` mappings suppress the jump; pending counts,
+  registers, operators, and Vim prompts keep their native keys.
+- This is viewport-local only. There is no operator-pending, Tree-sitter, remote,
+  or `/`/`?` integration, and no flash.nvim dependency.
+
 ## Closing with Ex commands
 
 - `:q` closes the current tab occurrence in the originating editor pane only if
@@ -114,7 +162,8 @@ a `VimConfig` to each `Editor` through its optional `vimConfig` prop. The
 mapping installer is shared and reference-counted across split panes:
 installing the same mapping twice does not stack it, and conflicting right-hand
 sides or incompatible recursion policies are rejected. `operator` maps to the
-engine's operator-pending context.
+engine's operator-pending context. An explicit `s` mapping in Normal or Visual
+mode keeps ownership of `s` and disables Crumb's viewport jump prompt.
 
 ### Complete mapping examples
 
@@ -172,7 +221,8 @@ tests never invoke Neovim.
 | Character finding | `f F t T ; ,`, including counts | [Neovim `f`](https://neovim.io/doc/user/motion.html#f), [Vim motion.txt](https://vimhelp.org/motion.txt.html#f) | Oracle `character-find-count-forward-repeat` (`gg3f.;,`), `character-find-count-backward-repeat` (`gg$2F.;`), and `character-find-till-count-both-directions` (`gg2t.;;2T.`); each is replayed by `tests/e2e/vim-editor.spec.ts` | **Full for the tested sequences.** The fixture covers all six commands, counts, and `;`/`,` repeat directions; exhaustive edge-case parity is not claimed. |
 | View movement | `H M L`; `Ctrl-D/U/F/E/Y` | [Neovim scroll](https://neovim.io/doc/user/scroll.html#CTRL-D), [Vim scroll](https://vimhelp.org/scroll.txt.html#CTRL-D) | `tests/e2e/vim-editor.spec.ts` “Ctrl-D on a wrapped line follows native scroll movement”; `gj` tests cover display-line movement; `tests/e2e/app-search-keyboard.spec.ts` and `tests/e2e/app-vim-routing.spec.ts` cover the Ctrl-B sidebar exception | **Partial.** Direct coverage for `Ctrl-D` and `gj`; no direct fixture for `H M L` or `Ctrl-U/F/E/Y`. `Ctrl-B` page-back is intentionally superseded by Crumb's sidebar toggle in a focused Vim editor. Display/scroll cursor movement is native, and its landing column updates the logical goal for a later `G`. |
 | Operators | `d c y > < g~ gu gU`; doubled line forms; counts; register prefixes; search as an operator motion | [Neovim change](https://neovim.io/doc/user/change.html#d), [`g~`](https://neovim.io/doc/user/change.html#g~), [`gU`](https://neovim.io/doc/user/change.html#gU) | `tests/e2e/vim-editor.spec.ts` “3dw deletes three words”, “ciw changes the inner word”, “vaw selects a word and delete removes it”, “dot repeats the last change”; oracle `count-multiplication`, `Y-yanks-to-end-of-line`, `search-backward-operator`; `tests/e2e/vim-lifecycle.spec.ts` “blurring a search prompt opened after an operator…” | **Partial.** Direct coverage for `d`, `c`, `y`, counts, a named register prefix, and `d?`; no direct fixture for `> < g~ gu gU`, all doubled line forms, or all register prefixes. **Known residual:** linewise-operator cursor placement. |
-| Direct edits | `x X s S D C Y r ~ J p P` | [Neovim change](https://neovim.io/doc/user/change.html#x), [`Y` default](https://neovim.io/doc/user/change.html#Y-default) | Oracle `Y-yanks-to-end-of-line`, `linewise-register-kind`; `tests/e2e/vim-editor.spec.ts` “named register keeps its text after the unnamed register changes”; `tests/e2e/vim-lifecycle.spec.ts` dot-repeat tests using `x` and `cw` | **Partial.** Direct coverage for `Y`, `p`, `P`, `x`, and change-repeat; no direct fixture for `X s S D C r ~ J`. **Known difference:** `Y` is Neovim `y$`, not the package's linewise default. |
+| Direct edits | `x X S D C Y r ~ J p P` (`s` is Crumb's viewport jump) | [Neovim change](https://neovim.io/doc/user/change.html#x), [`Y` default](https://neovim.io/doc/user/change.html#Y-default) | Oracle `Y-yanks-to-end-of-line`, `linewise-register-kind`; `tests/e2e/vim-editor.spec.ts` “named register keeps its text after the unnamed register changes”; `tests/e2e/vim-lifecycle.spec.ts` dot-repeat tests using `x` and `cw`; `tests/e2e/vim-jump.spec.ts` for `s` | **Partial.** Direct coverage for `Y`, `p`, `P`, `x`, and change-repeat; no direct fixture for `X S D C r ~ J`. **Known difference:** `Y` is Neovim `y$`, not the package's linewise default. `s` intentionally opens the viewport jump in Normal/Visual modes. |
+| Viewport jump | `s` then a literal query; live labels/highlights; Enter commits next-forward; label jumps; Backspace recomputes; zero-result exits; Escape restores/exits Visual | Crumb-specific Flash-inspired workflow, intentionally not Neovim parity | `tests/vim-jump.test.ts` (upstream Python trace, smartcase, lowercase-only reuse, collision filtering, full alphabet, next-forward target, mapping suppression); `tests/e2e/vim-jump.spec.ts` (trace labels/targets, true viewport and horizontal scroll, current marks/hooks, Ctrl-O history, mouse/external/session-capture lifecycle, Visual preview/restore, cached-state restoration, no editor chip); `tests/e2e/app-vim-flash-status.spec.ts` (real-App human-paced Python typing, status bar, Ctrl+Tab stale-state regression) | **Full for the scoped interaction.** Up to 52 labelled matches; additional onscreen matches remain highlighted. Visual preview/commit use separate native motions so the engine owns anchors and block geometry; only commit records a jump. No operator-pending, Tree-sitter, remote, or `/`/`?` integration; no flash.nvim dependency. |
 | Text objects | `iw/aw`, `iW/aW`; quotes/backticks; `i(`/`a(`, `i[`/`a[`, `i{`/`a{`, `i<`/`a<`; `ip/ap`, `is/as` | [Neovim text objects](https://neovim.io/doc/user/motion.html#iw), [Vim text objects](https://vimhelp.org/motion.txt.html#iw) | `tests/e2e/vim-editor.spec.ts` “ciw changes the inner word” and “vaw selects a word and delete removes it” | **Partial.** Direct coverage for `iw` and `aw`; the remaining listed objects are not directly fixture-covered (test-evidence gap). |
 | Visual selection and operators | Character/line/block selection and motion; operators and put; block `I`/`A`; `o`; `gv` | [Neovim Visual](https://neovim.io/doc/user/visual.html#v), [Visual repeat](https://neovim.io/doc/user/visual.html#visual-repeat) | Oracle `startofline-visual-char`, `startofline-visual-line`, `startofline-visual-block`, `visual-charwise-repeat`, `visual-linewise-repeat`; `tests/e2e/vim-editor.spec.ts` `vaw` case; skipped `visual-multiline-charwise-repeat`, `startofline-visual-line`, `visual-block-short-row-dollar` | **Partial.** Direct coverage for char/line/block delete and same-size repeat. Block `I/A`, `o`, and `gv` have no direct fixture. **Known residuals:** multiline charwise Visual repeat and short-row Visual-block register/cursor. |
 | Registers | Unnamed; named `a-z` and uppercase append; yank `0`; numbered deletes `1-9`; small-delete `-`; black-hole `_`; character/line/block types preserved. Explicit `+` best effort; no implicit unnamed clipboard; `*` deferred | [Neovim registers](https://neovim.io/doc/user/change.html#registers), [Vim registers](https://vimhelp.org/change.txt.html#registers) | `tests/e2e/vim-editor.spec.ts` “named register keeps its text after the unnamed register changes”; oracle `Y-yanks-to-end-of-line` (charwise), `linewise-register-kind` (linewise), `startofline-visual-block` (block); `tests/e2e/vim-lifecycle.spec.ts` “registers, search, repeat and marks survive disable/re-enable…” | **Partial.** Direct coverage for unnamed, named, char/line/block register kinds, and named paste flows. Uppercase append, numbered, small-delete, black-hole, and `+` are not directly fixture-covered. Unnamed is not synchronized with the system clipboard; `*` is deferred. |
@@ -185,7 +235,7 @@ tests never invoke Neovim.
 
 - Oracle cases: `tests/fixtures/vim-semantics.json`; IDs are referenced directly in the table. The fixture is generated by `tests/fixtures/vim-semantics.oracle.lua`.
 - Real-editor command tests: `tests/e2e/vim-editor.spec.ts` (named tests in the table), plus `tests/e2e/vim-lifecycle.spec.ts`, `tests/e2e/editor-component.spec.ts`, and `tests/e2e/editor-shared.spec.ts` for lifecycle, state, and mark behavior.
-- Unit/configuration tests: `tests/vim-semantics.test.ts`, `tests/vim-config.test.ts`, `tests/vim-engine.test.ts`, `tests/vim-session.test.ts`, and `tests/vim-shortcuts.test.ts`.
+- Unit/configuration tests: `tests/vim-semantics.test.ts`, `tests/vim-config.test.ts`, `tests/vim-engine.test.ts`, `tests/vim-session.test.ts`, `tests/vim-shortcuts.test.ts`, and `tests/vim-jump.test.ts`.
 
 A matrix row marked **Partial** or **Pending fixture** is intentionally not
 claimed as fixture-verified for every subcommand. The commands remain in the

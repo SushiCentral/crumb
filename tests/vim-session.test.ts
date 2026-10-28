@@ -34,6 +34,10 @@ interface FakeState {
   cursorRestores: Array<{ line: number; ch: number }>;
   events: string[];
   jumps: VimJumpBridgeHandlers | undefined;
+  normalizeCursor: { line: number; ch: number } | null;
+  normalizeHook: (() => void) | undefined;
+  normalizations: number;
+  semanticCursor: { line: number; ch: number } | null;
 }
 
 function createFakeAdapter() {
@@ -91,6 +95,23 @@ function createFakeAdapter() {
       fake.doc = fake.state.doc;
       return true;
     },
+    normalizeBeforeCapture(view: EditorView) {
+      const fake = states.get(view as object);
+      if (!fake) return;
+      fake.normalizations += 1;
+      fake.normalizeHook?.();
+      if (!fake.normalizeCursor) return;
+      const target = fake.state.doc.line(Math.min(fake.normalizeCursor.line + 1, fake.state.doc.lines));
+      fake.state = fake.state.update({
+        selection: { anchor: target.from + Math.min(fake.normalizeCursor.ch, target.length) },
+      }).state;
+      fake.doc = fake.state.doc;
+    },
+    semanticCursor(view: EditorView) {
+      const fake = states.get(view as object);
+      if (!fake?.semanticCursor) return null;
+      return { ...fake.semanticCursor };
+    },
   };
 
   return {
@@ -128,6 +149,10 @@ function createFakeAdapter() {
         cursorRestores: [],
         events: [],
         jumps: undefined,
+        normalizeCursor: null,
+        normalizeHook: undefined,
+        normalizations: 0,
+        semanticCursor: null,
       });
       return view;
     },
@@ -204,6 +229,24 @@ function createFakeAdapter() {
     },
     events(view: EditorView) {
       return states.get(view as object)?.events ?? [];
+    },
+    normalizations(view: EditorView) {
+      return states.get(view as object)?.normalizations ?? 0;
+    },
+    setNormalizeCursor(view: EditorView, line: number, ch = 0) {
+      const fake = states.get(view as object);
+      assert.ok(fake);
+      fake.normalizeCursor = { line, ch };
+    },
+    setNormalizeHook(view: EditorView, hook: (() => void) | undefined) {
+      const fake = states.get(view as object);
+      assert.ok(fake);
+      fake.normalizeHook = hook;
+    },
+    setSemanticCursor(view: EditorView, line: number, ch = 0) {
+      const fake = states.get(view as object);
+      assert.ok(fake);
+      fake.semanticCursor = { line, ch };
     },
   };
 }
@@ -390,6 +433,103 @@ test('synchronous focus reentry during finalization cannot reclaim ownership', (
   assert.equal(fake.restores(viewB).at(-1)?.repeat, 'A-latest');
   assert.equal(fake.focuses(viewA), 0);
   assert.equal(fake.focuses(viewB), 1, 'incoming pane receives focus after the transfer');
+});
+
+test('normalizes a transient preview before sampling the departure for jump history', async () => {
+  const fake = createFakeAdapter();
+  const session = createVimSession(fake.adapter);
+  session.reconcileDocuments(['A', 'B']);
+
+  const textA = makeText('A');
+  const textB = makeText('B');
+  const viewA = fake.createView(textA);
+  const viewB = fake.createView(textB);
+  const binding = session.attachPane('P', viewA, 'A', true);
+  session.attachPane('Q', viewB, 'B', true);
+  session.requestOwner('P');
+
+  // Visual Flash activation is line 0; its preview moved the real head to
+  // line 12. Ownership transfer must normalize back to activation before the
+  // departure is sampled, or Ctrl-o asks the source document for line 12.
+  fake.setCursor(viewA, 0, 0);
+  fake.setNormalizeCursor(viewA, 0, 0);
+  fake.setCursor(viewA, 12, 4);
+  assert.deepEqual(fake.cursor(viewA), { line: 12, ch: 4 });
+
+  let reentered = false;
+  fake.setNormalizeHook(viewA, () => {
+    if (reentered) return;
+    reentered = true;
+    // Normalization dispatches through the engine; focus cleanup may
+    // synchronously ask for the outgoing pane while it is finalizing.
+    session.requestOwner('P', { focus: true });
+  });
+
+  binding.beforeTransition();
+  fake.setDocument(viewB, textB, 0);
+  binding.afterTransition('B');
+
+  assert.equal(fake.normalizations(viewA), 1);
+  assert.equal(reentered, true);
+  assert.equal(fake.focuses(viewA), 0, 'normalization reentry must stay behind the finalization guard');
+
+  const targets: string[] = [];
+  session.setJumpNavigator(target => {
+    targets.push(`${target.documentId}:${target.line}:${target.ch}`);
+    if (target.documentId === 'A') {
+      binding.beforeTransition();
+      fake.setDocument(viewA, textA, target.line, target.ch);
+      binding.afterTransition('A');
+    }
+    return { paneId: 'P' };
+  });
+
+  fake.jumpMove(viewA, -1);
+  await flushMicrotasks();
+
+  assert.deepEqual(targets, ['A:0:0'], 'the recorded departure is the activation cursor, not the preview');
+});
+
+test('records the inclusive Vim Visual head, not CodeMirror\'s exclusive head, as the departure column', async () => {
+  const fake = createFakeAdapter();
+  const session = createVimSession(fake.adapter);
+  session.reconcileDocuments(['A', 'B']);
+
+  const textA = 'alpha beta alpha';
+  const textB = makeText('B');
+  const viewA = fake.createView(textA);
+  const viewB = fake.createView(textB);
+  const binding = session.attachPane('P', viewA, 'A', true);
+  session.attachPane('Q', viewB, 'B', true);
+  session.requestOwner('P');
+
+  // `vl` leaves the semantic Vim head on ch1 while charwise Visual's
+  // CodeMirror head is the exclusive ch2. Flash previews the next match, then
+  // normalization restores the same activation selection before sampling.
+  fake.setNormalizeCursor(viewA, 0, 2);
+  fake.setSemanticCursor(viewA, 0, 1);
+  fake.setCursor(viewA, 0, 12);
+  assert.deepEqual(fake.cursor(viewA), { line: 0, ch: 12 });
+
+  binding.beforeTransition();
+  fake.setDocument(viewB, textB, 0);
+  binding.afterTransition('B');
+
+  const targets: string[] = [];
+  session.setJumpNavigator(target => {
+    targets.push(`${target.documentId}:${target.line}:${target.ch}`);
+    if (target.documentId === 'A') {
+      binding.beforeTransition();
+      fake.setDocument(viewA, textA, target.line, target.ch);
+      binding.afterTransition('A');
+    }
+    return { paneId: 'P' };
+  });
+
+  fake.jumpMove(viewA, -1);
+  await flushMicrotasks();
+
+  assert.deepEqual(targets, ['A:0:1'], 'the exclusive CodeMirror head must not shift the departure by one');
 });
 
 function makeText(prefix: string, lines = 100): string {

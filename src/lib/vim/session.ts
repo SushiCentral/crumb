@@ -2,10 +2,12 @@ import type { EditorView } from '@codemirror/view';
 import type { EditorState } from '@codemirror/state';
 import {
   captureVimAdapter,
+  getVimSemanticCursor,
   hasActiveVimAdapter,
   registerVimJumpHandlers,
   restoreVimAdapter,
   restoreVimJumpCursor,
+  runVimCapturePreflight,
   type VimAdapterCapture,
   type VimDocumentMarks,
   type VimJumpBridgeHandlers,
@@ -53,6 +55,18 @@ export interface VimSessionAdapter {
    * substitute a fake.
    */
   restoreCursor?(view: EditorView, position: { line: number; ch: number }): boolean;
+  /**
+   * Finish transient engine previews (Flash restores its activation cursor)
+   * before the session samples the departure. Production runs the lifecycle
+   * preflight hook; tests can substitute a fake.
+   */
+  normalizeBeforeCapture?(view: EditorView): void;
+  /**
+   * Semantic Vim cursor/head used for departures. CodeMirror's charwise Visual
+   * head is exclusive, so sampling the raw selection would shift the recorded
+   * column. Production reads engine state inside lifecycle; tests can fake it.
+   */
+  semanticCursor?(view: EditorView): VimJumpPoint | null;
 }
 
 export interface VimSessionBinding {
@@ -109,6 +123,8 @@ const defaultAdapter: VimSessionAdapter = {
   hasAdapter: hasActiveVimAdapter,
   registerJumps: registerVimJumpHandlers,
   restoreCursor: restoreVimJumpCursor,
+  normalizeBeforeCapture: runVimCapturePreflight,
+  semanticCursor: getVimSemanticCursor,
 };
 
 interface BindingState {
@@ -169,6 +185,15 @@ export function createVimSession(adapter: VimSessionAdapter = defaultAdapter): V
       line: line.number - 1,
       ch: offset - line.from,
     };
+  }
+
+  function departureLocationOf(state: BindingState): VimJumpLocation | null {
+    // Visual departures must use Vim's inclusive head. CodeMirror's charwise
+    // Visual head is exclusive, so reading the raw selection would record the
+    // character after the cursor and shift Ctrl-o by one column.
+    const semantic = adapter.semanticCursor?.(state.view);
+    if (semantic) return pointLocation(state.documentId, semantic);
+    return locationOf(state);
   }
 
   function isEnabledOwner(state: BindingState): boolean {
@@ -352,13 +377,21 @@ export function createVimSession(adapter: VimSessionAdapter = defaultAdapter): V
     if (!binding) return;
     ownerBinding = null;
 
-    // The departure must be read while this adapter still owns the live
-    // document; captureTransientInput may finish insert-mode cleanup below.
-    // A replaying jump is not a user transition and must never be recorded.
-    pendingDeparture = replayingJump ? null : locationOf(binding);
-
+    // Focus/prompt cleanup can synchronously focus the outgoing editor while
+    // transient normalization or capture is still running; keep the guard
+    // active for the whole finalization window.
     finalizingPaneId = binding.paneId;
     try {
+      // Transient previews (Flash) move the real Vim head, so normalize them
+      // back to the activation cursor BEFORE sampling the departure. The
+      // lifecycle preflight inside capture would run too late for history.
+      adapter.normalizeBeforeCapture?.(binding.view);
+
+      // The departure must be read while this adapter still owns the live
+      // document; captureTransientInput may finish insert-mode cleanup below.
+      // A replaying jump is not a user transition and must never be recorded.
+      pendingDeparture = replayingJump ? null : departureLocationOf(binding);
+
       const captured = adapter.capture(binding.view);
       if (!captured) return;
 

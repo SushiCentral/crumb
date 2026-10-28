@@ -17,6 +17,7 @@ import {
 import { createCursorReporter, type CursorReporter } from '../lib/cursor-report';
 import { attachScrollSync } from '../lib/scroll-sync';
 import { createVimExtension, type VimExtension, type VimPublicState } from '../lib/vim/extension';
+import type { VimFlashState } from '../lib/vim/jump';
 import { defaultVimConfig, type VimConfig } from '../lib/vim/config';
 import { isVimLeaderMode, type VimLeaderAction } from '../lib/vim/leader';
 import { shouldVimOwnTab } from '../lib/vim/shortcuts';
@@ -55,6 +56,8 @@ interface EditorProps {
   onFocus?: () => void;
   /** Typed Vim mode/pending snapshot for the active application status bar. */
   onVimStateChange?: (paneId: string, state: VimPublicState) => void;
+  /** Live flash query and match count for this pane's status bar. */
+  onFlashStateChange?: (paneId: string, tabId: string, state: VimFlashState | null) => void;
 }
 
 export interface EditorHandle {
@@ -82,6 +85,37 @@ function editorAppearance(theme: Theme, fontSize: number, fontFamily: string) {
       fontFamily: `'${fontFamily}', monospace`,
       fontSize: `${fontSize}px`,
       lineHeight: String(EDITOR_LINE_HEIGHT),
+      // Flash colors are scoped to the active editor and its transient class.
+      // Keep the palette semantic so dark and light themes share the same UI
+      // rules without flattening their syntax colors.
+      '--crumb-flash-surface': `color-mix(in srgb, var(--editor) ${theme.dark ? '88%' : '94%'}, #000)`,
+      '--crumb-flash-dim-opacity': theme.dark ? '0.52' : '0.62',
+      '--crumb-flash-match-background': `color-mix(in srgb, var(--success) ${theme.dark ? '24%' : '18%'}, transparent)`,
+      '--crumb-flash-match-edge': 'color-mix(in srgb, var(--success) 78%, transparent)',
+      '--crumb-flash-target-background': theme.dark
+        ? 'color-mix(in srgb, var(--success) 82%, #fff)'
+        : 'var(--success)',
+      '--crumb-flash-target-foreground': theme.dark ? '#10251b' : '#fff',
+      '--crumb-flash-label-background': theme.dark
+        ? 'color-mix(in srgb, var(--success) 55%, #fff)'
+        : 'color-mix(in srgb, var(--success) 22%, #fff)',
+      '--crumb-flash-label-gradient-start': theme.dark
+        ? 'color-mix(in srgb, var(--success) 72%, #fff)'
+        : 'color-mix(in srgb, var(--success) 18%, #fff)',
+      '--crumb-flash-label-gradient-end': theme.dark
+        ? 'color-mix(in srgb, var(--accent) 66%, #fff)'
+        : 'color-mix(in srgb, var(--accent) 18%, #fff)',
+      '--crumb-flash-label-foreground': '#10251b',
+      '--crumb-flash-label-current-background': theme.dark
+        ? 'var(--success)'
+        : 'color-mix(in srgb, var(--success) 48%, #fff)',
+      '--crumb-flash-label-current-gradient-start': theme.dark
+        ? 'var(--success)'
+        : 'color-mix(in srgb, var(--success) 42%, #fff)',
+      '--crumb-flash-label-current-gradient-end': theme.dark
+        ? 'var(--accent)'
+        : 'color-mix(in srgb, var(--accent) 42%, #fff)',
+      '--crumb-flash-label-current-foreground': '#10251b',
     },
     '.cm-content': { padding: '10px 0' },
     '.cm-line': { padding: '0 16px' },
@@ -126,7 +160,7 @@ function editorAppearance(theme: Theme, fontSize: number, fontFamily: string) {
   return [themeExtension, cursorScrollMarginForFontSize(fontSize)];
 }
 
-const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, vimSession, tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, preferences, vimConfig = defaultVimConfig, onChange, onCursorChange, onSaveRequest, onVimLeaderAction, onExQuitRequest, onExWriteQuitRequest, onFocus, onVimStateChange }, ref) {
+const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, vimSession, tabId, path, openTabIds, doc, theme, fontSize, fontFamily, wordWrap, preferences, vimConfig = defaultVimConfig, onChange, onCursorChange, onSaveRequest, onVimLeaderAction, onExQuitRequest, onExWriteQuitRequest, onFocus, onVimStateChange, onFlashStateChange }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const statesRef = useRef(new Map<string, EditorState>());
@@ -134,12 +168,14 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
   const onChangeRef = useRef(onChange);
   const onCursorChangeRef = useRef(onCursorChange);
   const onVimStateChangeRef = useRef(onVimStateChange);
+  const onFlashStateChangeRef = useRef(onFlashStateChange);
   const onSaveRequestRef = useRef(onSaveRequest);
   const onVimLeaderActionRef = useRef(onVimLeaderAction);
   const onExQuitRequestRef = useRef(onExQuitRequest);
   const onExWriteQuitRequestRef = useRef(onExWriteQuitRequest);
   onCursorChangeRef.current = onCursorChange;
   onVimStateChangeRef.current = onVimStateChange;
+  onFlashStateChangeRef.current = onFlashStateChange;
   onSaveRequestRef.current = onSaveRequest;
   onVimLeaderActionRef.current = onVimLeaderAction;
   onExQuitRequestRef.current = onExQuitRequest;
@@ -182,6 +218,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
         paneId,
         tabId: activeTabRef.current,
       }),
+      onFlashStateChange: state => onFlashStateChangeRef.current?.(paneId, activeTabRef.current, state),
       // Editor fixtures that do not wire application actions keep Space as
       // the engine's normal right-motion.
       leader: onVimLeaderActionRef.current
@@ -331,6 +368,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ paneId, v
       reporter.cancel();
       vimStateSubscriptionRef.current?.();
       vimStateSubscriptionRef.current = null;
+      onFlashStateChangeRef.current?.(paneId, activeTabRef.current, null);
       vimBindingRef.current?.detach();
       vimBindingRef.current = null;
       viewRef.current = null;

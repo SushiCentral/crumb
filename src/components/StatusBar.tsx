@@ -1,5 +1,6 @@
 import type { CursorInfo } from '../lib/editor-extensions';
 import type { EditorPreferences } from '../lib/preferences';
+import type { VimFlashState } from '../lib/vim/jump';
 
 export interface VimStatus {
   mode: 'normal' | 'insert' | 'visual' | 'replace' | 'command' | 'terminal' | string;
@@ -14,6 +15,7 @@ interface StatusBarProps {
   hasDocument: boolean;
   cursor?: CursorInfo;
   vimStatus?: VimStatus;
+  flashStatus?: VimFlashState;
   preferences: EditorPreferences;
   lineEnding: string;
   language: string;
@@ -22,7 +24,7 @@ interface StatusBarProps {
   theme: string;
 }
 
-export default function StatusBar({ hasDocument, cursor, vimStatus, preferences, lineEnding, language, wordWrap, zoom, theme }: StatusBarProps) {
+export default function StatusBar({ hasDocument, cursor, vimStatus, flashStatus, preferences, lineEnding, language, wordWrap, zoom, theme }: StatusBarProps) {
   const mode = vimStatus?.mode;
   const pending = vimStatus?.pending;
   const modeClass = mode?.toLowerCase().replace(/[^a-z0-9_-]/g, '');
@@ -34,6 +36,12 @@ export default function StatusBar({ hasDocument, cursor, vimStatus, preferences,
         {pending?.count != null && <span className="vim-status-pending" aria-label={`Count ${pending.count}`}>Count {pending.count}</span>}
         {pending?.register != null && <span className="vim-status-pending" aria-label={`Register ${pending.register}`}>Reg {pending.register}</span>}
         {pending?.command != null && <span className="vim-status-pending" aria-label={`Pending command ${pending.command}`}>Cmd {pending.command}</span>}
+      </div>}
+      {flashStatus && <div className="vim-flash-status" role="status" aria-live="polite" aria-label={`Flash query: ${flashStatus.query || 'empty'}, ${flashStatus.matchCount} ${flashStatus.matchCount === 1 ? 'match' : 'matches'}`}>
+        <span className="vim-flash-symbol" aria-hidden="true">⌖</span>
+        <span className="vim-flash-label">Flash:</span>
+        <span className={`vim-flash-query${flashStatus.query ? '' : ' is-empty'}`}>{flashStatus.query || '…'}</span>
+        <span className="vim-flash-count">{flashStatus.matchCount} {flashStatus.matchCount === 1 ? 'match' : 'matches'}</span>
       </div>}
       {hasDocument ? <>
         <span>Ln {cursor?.line ?? '—'}, Col {cursor?.column ?? '—'}</span>

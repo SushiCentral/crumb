@@ -3,6 +3,7 @@ import type { Extension } from '@codemirror/state';
 import { ViewPlugin } from '@codemirror/view';
 import type { EditorView } from '@codemirror/view';
 import type { VimMapping } from './config.ts';
+import { isVimJumpActive } from './jump.ts';
 import { getVimPublicState, type VimPublicMode } from './lifecycle.ts';
 
 /**
@@ -280,6 +281,12 @@ class VimLeaderViewPlugin {
     if (event.isComposing || event.repeat) return false;
 
     const state = getVimPublicState(this.view);
+    // The jump prompt owns every printable key, including Space. Do not start
+    // or continue a leader sequence until the prompt has been dismissed.
+    if (isVimJumpActive(this.view)) {
+      this.controller.cancel();
+      return false;
+    }
     const continuing = this.controller.pending.length > 0;
     if (!isVimLeaderMode(state.mode)) {
       // Do not carry a Normal-mode prefix into insert mode or a Vim prompt.

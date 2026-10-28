@@ -10,6 +10,7 @@ import {
   type VimLeaderExtensionOptions,
 } from './leader.ts';
 import { createVimSurroundExtension, vimSurroundSuppressedByMappings } from './surround.ts';
+import { createVimJumpExtension, vimJumpSuppressedByMappings, type VimFlashState } from './jump.ts';
 import { installVimCommentOperator } from './comments.ts';
 import {
   cancelTransientInput,
@@ -47,6 +48,11 @@ export interface VimExtensionOptions {
    * to leave Space as the engine's normal right-motion.
    */
   leader?: VimLeaderExtensionOptions;
+  /**
+   * Live query/match state for Crumb's own flash UI. Called with null on every
+   * completion, cancellation, and teardown.
+   */
+  onFlashStateChange?: (state: VimFlashState | null) => void;
 }
 
 export interface VimWriteParameters {
@@ -215,6 +221,11 @@ export function createVimExtension(
   const leader = options.leader && !vimLeaderSuppressedByMappings(resolvedConfig.mappings)
     ? createVimLeaderExtension(options.leader)
     : null;
+  // A configured Normal/Visual `s` mapping owns the key; otherwise Crumb
+  // replaces the engine's substitute command with the viewport jump prompt.
+  const jump = vimJumpSuppressedByMappings(resolvedConfig.mappings)
+    ? null
+    : createVimJumpExtension({ onFlashStateChange: options.onFlashStateChange });
   const mappings = createMappingInstaller(resolvedConfig, {
     // These are the package's public keymap entry points. The registry above
     // makes repeated installs reference-counted instead of stacking mappings.
@@ -260,8 +271,11 @@ export function createVimExtension(
     extension: [
       // Surround delimiter input must see keys before the leader and the
       // engine, and its definitions must exist before Vim parses mappings.
+      // The leader precedes the jump prompt so an active `Space s ...` sequence
+      // owns its `s` before the Normal/Visual jump can start.
       surround,
       ...(leader ? [leader] : []),
+      ...(jump ? [jump] : []),
       vim({ status: false }),
       adapterLifecyclePlugin,
     ],
