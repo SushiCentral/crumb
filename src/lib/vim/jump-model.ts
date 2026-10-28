@@ -138,11 +138,20 @@ export function chooseFlashTarget(
   matches: readonly FlashMatch[],
   cursorOffset: number,
   wrap = true,
+  count = 1,
 ): FlashMatch | null {
   const ordered = [...matches].sort((a, b) => a.from - b.from || a.to - b.to);
-  const forward = ordered.find(match => match.from > cursorOffset);
-  if (forward) return forward;
-  return wrap ? ordered[0] ?? null : null;
+  if (ordered.length === 0) return null;
+  let start = ordered.findIndex(match => match.from > cursorOffset);
+  if (start < 0) {
+    if (!wrap) return null;
+    start = 0;
+  }
+  const step = Math.max(1, Math.trunc(count)) - 1;
+  const index = start + step;
+  return wrap
+    ? ordered[index % ordered.length] ?? null
+    : ordered[index] ?? null;
 }
 
 /**

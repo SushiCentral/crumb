@@ -10,7 +10,12 @@ import {
   type VimLeaderExtensionOptions,
 } from './leader.ts';
 import { createVimSurroundExtension, vimSurroundSuppressedByMappings } from './surround.ts';
-import { createVimJumpExtension, vimJumpSuppressedByMappings, type VimFlashState } from './jump.ts';
+import {
+  createVimJumpExtension,
+  vimJumpOperatorSuppressedByMappings,
+  vimJumpSuppressedByMappings,
+  type VimFlashState,
+} from './jump.ts';
 import { installVimCommentOperator } from './comments.ts';
 import {
   cancelTransientInput,
@@ -225,7 +230,10 @@ export function createVimExtension(
   // replaces the engine's substitute command with the viewport jump prompt.
   const jump = vimJumpSuppressedByMappings(resolvedConfig.mappings)
     ? null
-    : createVimJumpExtension({ onFlashStateChange: options.onFlashStateChange });
+    : createVimJumpExtension({
+        onFlashStateChange: options.onFlashStateChange,
+        suppressOperator: vimJumpOperatorSuppressedByMappings(resolvedConfig.mappings),
+      });
   const mappings = createMappingInstaller(resolvedConfig, {
     // These are the package's public keymap entry points. The registry above
     // makes repeated installs reference-counted instead of stacking mappings.

@@ -16,6 +16,7 @@ import { Prec, type Extension, type Text } from '@codemirror/state';
 import { ViewPlugin } from '@codemirror/view';
 import type { EditorView } from '@codemirror/view';
 import type { VimMapping } from './config.ts';
+import { isVimJumpActive } from './jump.ts';
 
 /**
  * Vim surround support for Crumb.
@@ -920,6 +921,10 @@ class VimSurroundViewPlugin {
   }
 
   handleKey(event: KeyboardEvent): boolean {
+    // Active Flash owns every query/label key, including `s` after an operator
+    // prefix. Without this guard, `dgs` followed by a literal `s` would be
+    // mistaken for a surround prefix.
+    if (isVimJumpActive(this.view)) return false;
     if (this.controller.hasPending) {
       // A pending surround must never survive losing the adapter (Vim disabled
       // or a tab switch) or entering an insert/prompt mode.

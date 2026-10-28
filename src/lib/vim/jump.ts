@@ -14,7 +14,10 @@ import {
   type FlashMatch,
 } from './jump-model.ts';
 import {
+  cancelVimPendingOperator,
   captureVimGoal,
+  clearVimOperatorPrefix,
+  disableVimRepeatForLastEdit,
   getVimPublicState,
   recordVimJump,
   registerVimCapturePreflight,
@@ -46,6 +49,8 @@ export interface VimFlashState {
 
 export interface VimJumpExtensionOptions {
   readonly onFlashStateChange?: (state: VimFlashState | null) => void;
+  /** An explicit operator-pending `gs` mapping owns the key. */
+  readonly suppressOperator?: boolean;
 }
 
 function clampOffset(doc: Text, offset: number): number {
@@ -67,12 +72,13 @@ function offsetAtPoint(doc: Text, point: VimJumpPoint): number {
   return line.from + Math.min(Math.max(0, Math.trunc(point.ch)), line.length);
 }
 
-type MotionIntent = 'preview' | 'commit' | 'restore';
+type MotionIntent = 'preview' | 'commit' | 'restore' | 'operator';
 
 const FLASH_KEYS: Readonly<Record<MotionIntent, { key: string; motion: string }>> = Object.freeze({
   preview: { key: '<Plug>CrumbFlashPreview', motion: 'crumbFlashPreview' },
   commit: { key: '<Plug>CrumbFlashCommit', motion: 'crumbFlashCommit' },
   restore: { key: '<Plug>CrumbFlashRestore', motion: 'crumbFlashRestore' },
+  operator: { key: '<Plug>CrumbFlashOperator', motion: 'crumbFlashOperator' },
 });
 
 const pendingTargets = new WeakMap<object, VimJumpPoint>();
@@ -103,6 +109,15 @@ function installVimFlashMotions(): void {
       { context: 'visual' },
     );
   }
+
+  Vim.defineMotion(FLASH_KEYS.operator.motion, motion);
+  Vim.mapCommand(
+    FLASH_KEYS.operator.key,
+    'motion',
+    FLASH_KEYS.operator.motion,
+    { inclusive: true, noRepeat: true },
+    { context: 'operatorPending' },
+  );
 }
 
 /** True while any view owns the transient jump prompt. */
@@ -119,11 +134,26 @@ export function isVimJumpMode(mode: string): mode is 'normal' | 'visual' | 'visu
     || mode === 'visual-block';
 }
 
+function isModifierOnlyKey(event: KeyboardEvent): boolean {
+  return event.key === 'Shift'
+    || event.key === 'Control'
+    || event.key === 'Alt'
+    || event.key === 'AltGraph'
+    || event.key === 'Meta';
+}
+
 /** Respect an explicit Normal/Visual `s` mapping instead of shadowing it. */
 export function vimJumpSuppressedByMappings(mappings: readonly VimMapping[]): boolean {
   return mappings.some(mapping =>
     mapping.lhs === 's'
     && (mapping.modes.includes('normal') || mapping.modes.includes('visual')),
+  );
+}
+
+/** An explicit operator-pending `gs` mapping wins over Crumb's Flash operator. */
+export function vimJumpOperatorSuppressedByMappings(mappings: readonly VimMapping[]): boolean {
+  return mappings.some(mapping =>
+    mapping.lhs === 'gs' && mapping.modes.includes('operator'),
   );
 }
 
@@ -142,6 +172,7 @@ interface LabelPosition {
 class VimJumpViewPlugin {
   private readonly view: EditorView;
   private readonly onFlashStateChange: ((state: VimFlashState | null) => void) | undefined;
+  private readonly suppressOperator: boolean;
   private readonly removeCapturePreflight: () => void;
   private readonly resizeObserver: ResizeObserver;
   private readonly handleScroll = (): void => {
@@ -149,6 +180,8 @@ class VimJumpViewPlugin {
   };
 
   private active = false;
+  private operatorMode = false;
+  private operatorCount = 1;
   private query = '';
   private matches: FlashMatch[] = [];
   private target: FlashMatch | null = null;
@@ -170,6 +203,7 @@ class VimJumpViewPlugin {
   constructor(view: EditorView, options: VimJumpExtensionOptions) {
     this.view = view;
     this.onFlashStateChange = options.onFlashStateChange;
+    this.suppressOperator = options.suppressOperator === true;
     this.removeCapturePreflight = registerVimCapturePreflight(view, () => {
       this.restorePreviewBeforeCapture();
     });
@@ -189,7 +223,10 @@ class VimJumpViewPlugin {
 
   handleKey(event: KeyboardEvent): boolean {
     if (event.isComposing) return false;
-    if (!this.active) return this.handleStartKey(event);
+    if (!this.active) {
+      if (this.handleOperatorStart(event)) return true;
+      return this.handleStartKey(event);
+    }
     return this.handlePromptKey(event);
   }
 
@@ -232,6 +269,47 @@ class VimJumpViewPlugin {
     this.resetState({ refresh: false, notify: true });
   }
 
+  private handleOperatorStart(event: KeyboardEvent): boolean {
+    if (this.suppressOperator) return false;
+    if (event.repeat) return false;
+    if (event.ctrlKey || event.metaKey || event.altKey) return false;
+    if (event.key !== 's') return false;
+
+    const cm = getCM(this.view);
+    const vim = cm?.state.vim;
+    const input = vim?.inputState;
+    if (!cm || !vim || !input?.operator || vim.insertMode || vim.visualMode) return false;
+    const pendingKeys = input.keyBuffer.join('');
+    const motionCount = /^(\d*)g$/.exec(pendingKeys);
+    if (!motionCount) return false;
+    const motionRepeat = motionCount[1].length > 0 ? Number.parseInt(motionCount[1], 10) : 1;
+
+    this.operatorMode = true;
+    this.operatorCount = Math.max(
+      1,
+      Math.trunc((input.getRepeat() || 1) * motionRepeat),
+    );
+    this.activationVisual = false;
+    this.activationCursor = this.view.state.selection.main.head;
+    this.activationScrollTop = this.view.scrollDOM.scrollTop;
+    this.activationScrollLeft = this.view.scrollDOM.scrollLeft;
+    this.activationGoal = captureVimGoal(this.view);
+    this.query = '';
+    this.matches = [];
+    this.target = null;
+    this.previousLabels.clear();
+    this.transientDecorations = Decoration.none;
+    this.active = true;
+    activeJumpViews.add(this.view);
+    this.view.dom.classList.add('cm-flash-active');
+    this.ensureLive();
+    this.ensureLabelLayer();
+    clearVimOperatorPrefix(this.view);
+    this.renderLive();
+    this.emitState();
+    return true;
+  }
+
   private handleStartKey(event: KeyboardEvent): boolean {
     if (event.repeat) return false;
     if (event.ctrlKey || event.metaKey || event.altKey) return false;
@@ -270,7 +348,17 @@ class VimJumpViewPlugin {
   }
 
   private handlePromptKey(event: KeyboardEvent): boolean {
-    if (event.ctrlKey || event.metaKey || event.altKey) return false;
+    if (isModifierOnlyKey(event)) return true;
+    if (event.ctrlKey || event.metaKey || event.altKey) {
+      if (this.operatorMode) {
+        // Cancel before the chord reaches Vim/App so a destructive pending
+        // operator can never consume a modified motion. Returning false keeps
+        // application chords such as Ctrl-Tab available after the operator is
+        // already cleared.
+        this.resetState({ refresh: true, notify: true });
+      }
+      return false;
+    }
 
     if (event.key === 'Escape') {
       this.restoreTransientPreview({ exitVisual: true, includeScroll: true });
@@ -336,17 +424,19 @@ class VimJumpViewPlugin {
     });
     rememberFlashLabels(this.previousLabels, result.matches);
     this.matches = result.matches;
-    this.target = result.target;
+    this.target = this.operatorMode
+      ? chooseFlashTarget(result.matches, this.activationCursor, true, this.operatorCount)
+      : result.target;
     this.transientDecorations = this.query.length === 0
       ? Decoration.none
-      : this.buildDecorations(result.matches, result.target, this.view.visibleRanges);
+      : this.buildDecorations(result.matches, this.target, this.view.visibleRanges);
 
     this.renderLabels();
     this.renderLive();
     this.emitState();
     // Force the view plugin's transient decoration set to be re-read.
     this.view.dispatch({});
-    if (applyPreview && this.activationVisual) this.previewTarget();
+    if (applyPreview && !this.operatorMode && this.activationVisual) this.previewTarget();
     this.schedulePositionLabels();
   }
 
@@ -380,10 +470,12 @@ class VimJumpViewPlugin {
   ): DecorationSet {
     if (matches.length === 0) return Decoration.none;
     const ranges = matches.map(match => {
-      const classes = match.from === target?.from
-        ? 'crumb-jump-match crumb-jump-current'
-        : 'crumb-jump-match';
-      return Decoration.mark({ class: classes }).range(match.from, match.to);
+      const current = match.from === target?.from;
+      const classes = current ? 'crumb-jump-match crumb-jump-current' : 'crumb-jump-match';
+      return Decoration.mark({
+        class: classes,
+        attributes: current ? { 'data-flash-offset': String(match.from) } : undefined,
+      }).range(match.from, match.to);
     });
 
     const ordered = [...matches].sort((a, b) => a.from - b.from);
@@ -414,15 +506,25 @@ class VimJumpViewPlugin {
   }
 
   private commitTarget(): void {
-    const target = chooseFlashTarget(this.matches, this.activationCursor);
+    const target = this.operatorMode
+      ? chooseFlashTarget(this.matches, this.activationCursor, true, this.operatorCount)
+      : chooseFlashTarget(this.matches, this.activationCursor);
     if (target) {
       this.commitMatch(target);
+      return;
+    }
+    if (this.operatorMode) {
+      this.cancelOperatorSelection();
       return;
     }
     this.resetState({ refresh: true, notify: true });
   }
 
   private commitMatch(match: FlashMatch): void {
+    if (this.operatorMode) {
+      this.commitOperator(match);
+      return;
+    }
     const doc = this.view.state.doc;
     const activation = pointAtOffset(doc, this.activationCursor);
     const target = pointAtOffset(doc, match.from);
@@ -433,7 +535,27 @@ class VimJumpViewPlugin {
     recordVimJump(this.view, activation, target);
   }
 
+  private commitOperator(match: FlashMatch): void {
+    const target = pointAtOffset(this.view.state.doc, match.from);
+    this.resetState({ refresh: false, notify: true, preserveOperator: true });
+    const moved = this.applyNativeMotion(target, 'operator');
+    if (moved) {
+      disableVimRepeatForLastEdit(this.view);
+    } else {
+      cancelVimPendingOperator(this.view);
+      this.view.dispatch({});
+    }
+  }
+
+  private cancelOperatorSelection(): void {
+    this.resetState({ refresh: true, notify: true });
+    this.view.scrollDOM.scrollTop = this.activationScrollTop;
+    this.view.scrollDOM.scrollLeft = this.activationScrollLeft;
+  }
+
   private finishNoResults(): void {
+    const scrollTop = this.activationScrollTop;
+    const scrollLeft = this.activationScrollLeft;
     this.matches = [];
     this.target = null;
     this.transientDecorations = Decoration.none;
@@ -445,6 +567,8 @@ class VimJumpViewPlugin {
       restoreVimGoal(this.view, this.activationGoal);
     }
     this.resetState({ refresh: true, notify: true });
+    this.view.scrollDOM.scrollTop = scrollTop;
+    this.view.scrollDOM.scrollLeft = scrollLeft;
   }
 
   private restoreTransientPreview(options: { exitVisual: boolean; includeScroll: boolean }): void {
@@ -498,8 +622,17 @@ class VimJumpViewPlugin {
     }
   }
 
-  private resetState(options: { refresh: boolean; notify: boolean }): void {
+  private resetState(options: {
+    refresh: boolean;
+    notify: boolean;
+    preserveOperator?: boolean;
+  }): void {
     const wasActive = this.active;
+    if (this.operatorMode && !options.preserveOperator) {
+      cancelVimPendingOperator(this.view);
+    }
+    this.operatorMode = false;
+    this.operatorCount = 1;
     this.active = false;
     activeJumpViews.delete(this.view);
     this.cancelRefresh();

@@ -242,6 +242,8 @@ export async function openApp(page: Page, options: AppStubOptions = {}): Promise
   }, options);
 
   await page.goto('/');
+  // Navigation can finish before React mounts the shortcut-owning app shell.
+  await expect(page.locator('.app-shell')).toBeVisible();
 }
 
 export async function appStub(page: Page): Promise<StubSnapshot> {
@@ -263,9 +265,11 @@ export async function openFileViaShortcut(page: Page, path: string): Promise<voi
   await page.evaluate(next => {
     (window as unknown as Record<string, { setOpenQueue: (paths: string[]) => void }>).__crumbTest.setOpenQueue([next]);
   }, path);
-  // Ctrl-O with a Vim-owned editor would be handled by Vim. Dialog opens are
-  // deliberately initiated from a non-editor focus surface.
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  // A real non-editor focus target also cancels deferred editor focus repair;
+  // blur alone can race that repair and route Ctrl-O to Vim's jump history.
+  const focusAnchor = page.locator('.command-trigger');
+  await focusAnchor.focus();
+  await expect(focusAnchor).toBeFocused();
   await page.keyboard.press('Control+o');
   const name = path.split('/').pop() ?? path;
   await expect(page.locator('.editor-tab-label').filter({ hasText: name })).toHaveCount(1);

@@ -96,6 +96,35 @@ export function recordVimJump(view: EditorView, from: VimJumpPoint, to: VimJumpP
   );
 }
 
+/** Remove a partially typed `g` without disturbing a pending operator/count. */
+export function clearVimOperatorPrefix(view: EditorView): void {
+  const cm = getCM(view);
+  const vim = cm?.state.vim;
+  if (!cm || !vim?.inputState.operator) return;
+  vim.inputState.keyBuffer = [];
+  vim.expectLiteralNext = false;
+  vim.status = '';
+}
+
+/** Cancel a pending operator/count/register without editing or using history. */
+export function cancelVimPendingOperator(view: EditorView): void {
+  const cm = getCM(view);
+  if (!cm || !cm.state.vim) return;
+  resetPendingInput(cm);
+}
+
+/**
+ * A Flash operator's absolute selector target cannot be replayed safely. Clear
+ * only this adapter's native last-edit snapshot. Cancellation never calls this;
+ * successful Flash operators (including yank) intentionally disable repeat.
+ */
+export function disableVimRepeatForLastEdit(view: EditorView): void {
+  const vim = adapterVimState(view);
+  if (!vim) return;
+  vim.lastEditInputState = undefined;
+  vim.lastEditActionCommand = undefined;
+}
+
 /** Plain engine positions. The bridge never stores adapter-bound markers. */
 export interface VimJumpPoint {
   line: number;

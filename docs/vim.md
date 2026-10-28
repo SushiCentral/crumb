@@ -117,8 +117,38 @@ the document is excluded, using the same smartcase policy.
   restored by a tab switch cannot bring stale matches back.
 - Explicit Normal or Visual `s` mappings suppress the jump; pending counts,
   registers, operators, and Vim prompts keep their native keys.
-- This is viewport-local only. There is no operator-pending, Tree-sitter, remote,
-  or `/`/`?` integration, and no flash.nvim dependency.
+- This is viewport-local only. There is no remote, Tree-sitter, cross-window, or
+  search-prompt integration, and no flash.nvim dependency.
+
+### Flash operator motion
+
+With a Vim operator already pending, `gs` starts the same live viewport Flash
+selector as an operator motion. This supports `dgs`, `cgs`, `ygs`, ordinary
+`>gs`/`<gs`, and `g~gs`/`gugs`/`gUgs` where the native engine supports the
+operator. Counting before or after the operator selects the Nth forward/wrapped
+target for Enter; an explicit label ignores the count. The chosen label or Enter
+commits one native inclusive motion to the selected match start, and the
+operator then executes normally. No operator is reimplemented.
+
+- Before confirmation, Flash is decoration-only: the cursor, document,
+  registers, undo history, and jump list do not change.
+- Escape, no results, blur, mouse selection, external edits, tab/pane transfer,
+  and Vim disable clear Flash and the pending operator without an edit.
+- Active operator Flash owns `s` before surround prefix handling, so literal
+  query text and assigned `s` labels are never mistaken for `ds`/`cs`/`ys`.
+  Idle surround prefixes remain unchanged.
+- Actual modified chords (such as Ctrl-D/F or Ctrl-arrow) cancel Flash and the
+  pending operator before Vim sees them. Pure modifier keydowns are ignored, so
+  Shift-assisted query text still works. Application Ctrl-Tab remains available
+  after the operator is already cleared.
+- Configured `dgs`/`cgs`/`ygs`-style operators are unchanged; an explicit
+  operator-pending `gs` mapping wins over Crumb. `ds`, `cs`, `ys`, `yss`, and
+  Visual `S` continue to belong to surround.
+- Native dot-repeat cannot safely replay this absolute selector target after
+  document changes. A committed Flash operator clears only that adapter's
+  last-edit repeat snapshot, so `.` does not repeat the selector or a `cgs`
+  insert payload. Canceling Flash preserves the previous ordinary `.` repeat.
+  No stale absolute target is retained.
 
 ## Closing with Ex commands
 
@@ -222,7 +252,8 @@ tests never invoke Neovim.
 | View movement | `H M L`; `Ctrl-D/U/F/E/Y` | [Neovim scroll](https://neovim.io/doc/user/scroll.html#CTRL-D), [Vim scroll](https://vimhelp.org/scroll.txt.html#CTRL-D) | `tests/e2e/vim-editor.spec.ts` “Ctrl-D on a wrapped line follows native scroll movement”; `gj` tests cover display-line movement; `tests/e2e/app-search-keyboard.spec.ts` and `tests/e2e/app-vim-routing.spec.ts` cover the Ctrl-B sidebar exception | **Partial.** Direct coverage for `Ctrl-D` and `gj`; no direct fixture for `H M L` or `Ctrl-U/F/E/Y`. `Ctrl-B` page-back is intentionally superseded by Crumb's sidebar toggle in a focused Vim editor. Display/scroll cursor movement is native, and its landing column updates the logical goal for a later `G`. |
 | Operators | `d c y > < g~ gu gU`; doubled line forms; counts; register prefixes; search as an operator motion | [Neovim change](https://neovim.io/doc/user/change.html#d), [`g~`](https://neovim.io/doc/user/change.html#g~), [`gU`](https://neovim.io/doc/user/change.html#gU) | `tests/e2e/vim-editor.spec.ts` “3dw deletes three words”, “ciw changes the inner word”, “vaw selects a word and delete removes it”, “dot repeats the last change”; oracle `count-multiplication`, `Y-yanks-to-end-of-line`, `search-backward-operator`; `tests/e2e/vim-lifecycle.spec.ts` “blurring a search prompt opened after an operator…” | **Partial.** Direct coverage for `d`, `c`, `y`, counts, a named register prefix, and `d?`; no direct fixture for `> < g~ gu gU`, all doubled line forms, or all register prefixes. **Known residual:** linewise-operator cursor placement. |
 | Direct edits | `x X S D C Y r ~ J p P` (`s` is Crumb's viewport jump) | [Neovim change](https://neovim.io/doc/user/change.html#x), [`Y` default](https://neovim.io/doc/user/change.html#Y-default) | Oracle `Y-yanks-to-end-of-line`, `linewise-register-kind`; `tests/e2e/vim-editor.spec.ts` “named register keeps its text after the unnamed register changes”; `tests/e2e/vim-lifecycle.spec.ts` dot-repeat tests using `x` and `cw`; `tests/e2e/vim-jump.spec.ts` for `s` | **Partial.** Direct coverage for `Y`, `p`, `P`, `x`, and change-repeat; no direct fixture for `X S D C r ~ J`. **Known difference:** `Y` is Neovim `y$`, not the package's linewise default. `s` intentionally opens the viewport jump in Normal/Visual modes. |
-| Viewport jump | `s` then a literal query; live labels/highlights; Enter commits next-forward; label jumps; Backspace recomputes; zero-result exits; Escape restores/exits Visual | Crumb-specific Flash-inspired workflow, intentionally not Neovim parity | `tests/vim-jump.test.ts` (upstream Python trace, smartcase, lowercase-only reuse, collision filtering, full alphabet, next-forward target, mapping suppression); `tests/e2e/vim-jump.spec.ts` (trace labels/targets, true viewport and horizontal scroll, current marks/hooks, Ctrl-O history, mouse/external/session-capture lifecycle, Visual preview/restore, cached-state restoration, no editor chip); `tests/e2e/app-vim-flash-status.spec.ts` (real-App human-paced Python typing, status bar, Ctrl+Tab stale-state regression) | **Full for the scoped interaction.** Up to 52 labelled matches; additional onscreen matches remain highlighted. Visual preview/commit use separate native motions so the engine owns anchors and block geometry; only commit records a jump. No operator-pending, Tree-sitter, remote, or `/`/`?` integration; no flash.nvim dependency. |
+| Viewport jump | `s` then a literal query; live labels/highlights; Enter commits next-forward; label jumps; Backspace recomputes; zero-result exits; Escape restores/exits Visual | Crumb-specific Flash-inspired workflow, intentionally not Neovim parity | `tests/vim-jump.test.ts` (upstream Python trace, smartcase, lowercase-only reuse, collision filtering, full alphabet, next-forward target, mapping suppression); `tests/e2e/vim-jump.spec.ts` (trace labels/targets, true viewport and horizontal scroll, current marks/hooks, Ctrl-O history, mouse/external/session-capture lifecycle, Visual preview/restore, cached-state restoration, no editor chip); `tests/e2e/app-vim-flash-status.spec.ts` (real-App human-paced Python typing, status bar, Ctrl+Tab stale-state regression) | **Full for the scoped interaction.** Up to 52 labelled matches; additional onscreen matches remain highlighted. Visual preview/commit use separate native motions so the engine owns anchors and block geometry; only commit records a jump. Operator integration is documented in its own row. No Tree-sitter, remote, or `/`/`?` integration; no flash.nvim dependency. |
+| Flash operator | Pending operator + `gs`; `dgs`/`cgs`/`ygs`, `>gs`/`<gs`, case operators; count selects Nth Enter target; labels ignore count | Crumb-specific Flash-inspired operator motion, intentionally not Neovim parity | `tests/vim-jump.test.ts` (counted target choice, operator mapping suppression); `tests/e2e/vim-flash-operator.spec.ts` (forward/backward/multiline, inclusive start, registers, counts, named registers, cancellation, session capture, undo, dot limit, configured conflict); `tests/e2e/vim-surround.spec.ts` unchanged | **Full for the scoped operator motion.** One native inclusive motion reaches the match start; the engine executes/records the operator. Dot-repeat has no safe absolute-selector replay target and is a documented limit. No remote/cross-window/Tree-sitter/search integration. |
 | Text objects | `iw/aw`, `iW/aW`; quotes/backticks; `i(`/`a(`, `i[`/`a[`, `i{`/`a{`, `i<`/`a<`; `ip/ap`, `is/as` | [Neovim text objects](https://neovim.io/doc/user/motion.html#iw), [Vim text objects](https://vimhelp.org/motion.txt.html#iw) | `tests/e2e/vim-editor.spec.ts` “ciw changes the inner word” and “vaw selects a word and delete removes it” | **Partial.** Direct coverage for `iw` and `aw`; the remaining listed objects are not directly fixture-covered (test-evidence gap). |
 | Visual selection and operators | Character/line/block selection and motion; operators and put; block `I`/`A`; `o`; `gv` | [Neovim Visual](https://neovim.io/doc/user/visual.html#v), [Visual repeat](https://neovim.io/doc/user/visual.html#visual-repeat) | Oracle `startofline-visual-char`, `startofline-visual-line`, `startofline-visual-block`, `visual-charwise-repeat`, `visual-linewise-repeat`; `tests/e2e/vim-editor.spec.ts` `vaw` case; skipped `visual-multiline-charwise-repeat`, `startofline-visual-line`, `visual-block-short-row-dollar` | **Partial.** Direct coverage for char/line/block delete and same-size repeat. Block `I/A`, `o`, and `gv` have no direct fixture. **Known residuals:** multiline charwise Visual repeat and short-row Visual-block register/cursor. |
 | Registers | Unnamed; named `a-z` and uppercase append; yank `0`; numbered deletes `1-9`; small-delete `-`; black-hole `_`; character/line/block types preserved. Explicit `+` best effort; no implicit unnamed clipboard; `*` deferred | [Neovim registers](https://neovim.io/doc/user/change.html#registers), [Vim registers](https://vimhelp.org/change.txt.html#registers) | `tests/e2e/vim-editor.spec.ts` “named register keeps its text after the unnamed register changes”; oracle `Y-yanks-to-end-of-line` (charwise), `linewise-register-kind` (linewise), `startofline-visual-block` (block); `tests/e2e/vim-lifecycle.spec.ts` “registers, search, repeat and marks survive disable/re-enable…” | **Partial.** Direct coverage for unnamed, named, char/line/block register kinds, and named paste flows. Uppercase append, numbered, small-delete, black-hole, and `+` are not directly fixture-covered. Unnamed is not synchronized with the system clipboard; `*` is deferred. |

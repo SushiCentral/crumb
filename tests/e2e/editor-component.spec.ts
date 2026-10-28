@@ -208,9 +208,9 @@ test('characterwise Visual mode shows the exact selected characters, including t
   expect(initialCursorStyle.color).toBe(foregroundColor);
   expect(initialCursorStyle.boxShadow).toContain('rgb(89, 185, 209)');
 
-  // `v` must select exactly the character under the cursor, not a collapsed
-  // range. Verify the rendered CodeMirror selection, not a synthetic text Range.
-  expect((await state(page)).cursor.selected).toBe(1);
+  // `v` must select exactly the character under the cursor. Await the debounced
+  // status snapshot, then verify the rendered CodeMirror selection below.
+  await expect.poll(async () => (await state(page)).cursor.selected).toBe(1);
   const initialSelection = cmEditor.locator('.cm-selectionBackground');
   await expect(initialSelection).toHaveCount(1);
   const initialSelectionBox = await initialSelection.boundingBox();

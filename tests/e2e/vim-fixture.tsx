@@ -17,7 +17,14 @@ const leaderActions: string[] = [];
 let flashState: { query: string; matchCount: number } | null = null;
 let cachedState: EditorState | null = null;
 let view: EditorView;
-const vim = createVimExtension(undefined, {
+const fixtureVimConfig = params.get('operatorGs') === '1'
+  ? {
+      mappings: [
+        { lhs: 'gs', rhs: 'l', modes: ['operator'] as const },
+      ],
+    }
+  : undefined;
+const vim = createVimExtension(fixtureVimConfig, {
   onWrite: () => {
     writes.push(view.state.doc.toString());
   },

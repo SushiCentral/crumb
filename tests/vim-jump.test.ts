@@ -13,7 +13,10 @@ import {
   labelFlashMatches,
   rememberFlashLabels,
 } from '../src/lib/vim/jump-model.ts';
-import { vimJumpSuppressedByMappings } from '../src/lib/vim/jump.ts';
+import {
+  vimJumpOperatorSuppressedByMappings,
+  vimJumpSuppressedByMappings,
+} from '../src/lib/vim/jump.ts';
 
 interface TraceResult {
   offset: number;
@@ -262,6 +265,28 @@ test('Enter target is the next forward match from the activation cursor, wrappin
   assert.equal(chooseFlashTarget(labelled, 2)?.from, 4);
   assert.equal(chooseFlashTarget(labelled, 4)?.from, 0);
   assert.equal(chooseFlashTarget(labelled, 4, false), null);
+});
+
+test('counts select the Nth forward/wrapped Flash target', () => {
+  const text = 'x x x x';
+  const matches = findFlashMatches(text, 'x', [{ from: 0, to: text.length }]);
+  const labelled = labelFlashMatches(text, 'x', matches, 0).matches;
+
+  assert.equal(chooseFlashTarget(labelled, 0, true, 1)?.from, 2);
+  assert.equal(chooseFlashTarget(labelled, 0, true, 2)?.from, 4);
+  assert.equal(chooseFlashTarget(labelled, 0, true, 4)?.from, 0);
+});
+
+test('configured operator gs mappings keep ownership', () => {
+  const mapping = (lhs: string, modes: VimMapping['modes']): VimMapping => ({
+    lhs,
+    rhs: 'l',
+    modes,
+  });
+
+  assert.equal(vimJumpOperatorSuppressedByMappings([mapping('gs', ['operator'])]), true);
+  assert.equal(vimJumpOperatorSuppressedByMappings([mapping('gs', ['normal'])]), false);
+  assert.equal(vimJumpOperatorSuppressedByMappings([mapping('gS', ['operator'])]), false);
 });
 
 test('configured Normal or Visual s mappings keep ownership', () => {
