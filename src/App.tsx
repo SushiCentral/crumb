@@ -1397,7 +1397,7 @@ export default function App() {
 
   return (
     <div className="app-shell" style={{ ...themeVariables(theme, codeFont), colorScheme: theme.dark ? 'dark' : 'light', height: "100vh", width: "100vw", display: "flex", flexDirection: "column", overflow: "hidden", backgroundColor: "var(--editor)", color: "var(--text)" }}>
-      <header className="top-bar">
+      <header className="top-bar" data-tauri-drag-region>
         <div className="top-bar-brand" title={explorerRootPath ? `Crumb — ${explorerRootPath}` : 'Crumb'}>
           <strong>{explorerRootPath ? getFileNameFromPath(explorerRootPath) : 'Crumb'}</strong>
         </div>

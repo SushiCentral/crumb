@@ -30,7 +30,8 @@ body,
     overflow: auto;
 }
 
-.top-bar { position: relative; z-index: 20; display: grid; grid-template-columns: minmax(100px, 1fr) minmax(220px, 520px) minmax(160px, 1fr); align-items: center; gap: 12px; height: 44px; flex: none; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--activity); font: 12px var(--ui-font); }
+.top-bar { position: relative; z-index: 20; display: grid; grid-template-columns: minmax(100px, 1fr) minmax(220px, 520px) minmax(160px, 1fr); align-items: center; gap: 12px; height: 44px; flex: none; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--activity); font: 12px var(--ui-font); -webkit-app-region: drag; }
+.top-bar button, .top-bar input, .top-bar kbd { -webkit-app-region: no-drag; }
 .top-bar-brand { grid-column: 1; display: flex; align-items: center; min-width: 0; color: var(--label-heading); letter-spacing: .4px; font-weight: 600; }
 .top-bar-actions { grid-column: 3; display: flex; align-items: center; justify-content: flex-end; min-width: 0; gap: 12px; color: var(--muted); }
 .top-bar-brand strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }

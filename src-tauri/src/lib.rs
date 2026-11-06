@@ -282,6 +282,16 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "linux")]
             enable_smooth_scrolling(app.handle());
+            // On Linux the window manager owns framing (Hyprland rules, GNOME
+            // SSD, etc.), so don't request a client decoration here and let
+            // the compositor decide. Windows/macOS keep the native title bar.
+            #[cfg(target_os = "linux")]
+            {
+                use tauri::Manager;
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_decorations(false);
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
