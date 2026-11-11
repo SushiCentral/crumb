@@ -1,3 +1,4 @@
+import { shortcutLabel } from '../lib/platform';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { codeFonts, type Theme } from '../lib/themes';
 import { CloseIcon } from './Icons';
@@ -19,18 +20,19 @@ interface SettingsModalProps {
   clearPromptOnStart: boolean;
   onClearPromptOnStartChange: (enabled: boolean) => void;
   onResetLayout: () => void;
-  onClose: () => void;
+  onClose: (reason: SettingsCloseReason) => void;
 }
 
 const tabs = ['Appearance', 'Editor', 'Terminal', 'Workspace'] as const;
 type SettingsTab = typeof tabs[number];
+export type SettingsCloseReason = 'cancel' | 'outside';
 
-function Toggle({ id, label, description, checked, onChange }: {
-  id: string; label: string; description?: string; checked: boolean; onChange: (value: boolean) => void;
+function Toggle({ id, label, description, descriptionId, checked, onChange }: {
+  id: string; label: string; description?: string; descriptionId?: string; checked: boolean; onChange: (value: boolean) => void;
 }) {
   return <div className="settings-row">
-    <div className="settings-row-label"><label htmlFor={id}>{label}</label>{description && <small>{description}</small>}</div>
-    <button id={id} className={`toggle-switch ${checked ? 'checked' : ''}`} role="switch" aria-checked={checked} onClick={() => onChange(!checked)}><span className="toggle-slider" /></button>
+    <div className="settings-row-label"><label htmlFor={id}>{label}</label>{description && <small id={descriptionId}>{description}</small>}</div>
+    <button id={id} className={`toggle-switch ${checked ? 'checked' : ''}`} role="switch" aria-checked={checked} aria-describedby={descriptionId} onClick={() => onChange(!checked)}><span className="toggle-slider" /></button>
   </div>;
 }
 
@@ -41,13 +43,14 @@ export default function SettingsModal({ themes, currentThemeId, onThemeChange, o
   onCloseRef.current = onClose;
 
   useEffect(() => {
-    const previousFocus = document.activeElement as HTMLElement | null;
     modalRef.current?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.focus();
-    return () => { previousFocus?.focus(); };
+    // Focus restoration is an App-level decision: a cancel returns to the
+    // invoking editor, while an outside click leaves focus where the user put
+    // it. The modal must not resurrect a detached previous element.
   }, []);
 
   const handleKeyDown = (event: KeyboardEvent) => {
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onCloseRef.current(); }
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onCloseRef.current('cancel'); }
     if (event.key !== 'Tab') return;
     const focusable = Array.from(modalRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]):not([tabindex="-1"]), select, input') ?? []);
     const first = focusable[0];
@@ -56,11 +59,13 @@ export default function SettingsModal({ themes, currentThemeId, onThemeChange, o
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   };
 
-  return <div className="settings-overlay" onMouseDown={onClose}>
+  return <div className="settings-overlay" onMouseDown={event => {
+    if (event.target === event.currentTarget) onClose('outside');
+  }}>
     <div ref={modalRef} className="settings-modal" role="dialog" aria-modal="true" aria-label="Editor Settings" onMouseDown={event => event.stopPropagation()} onKeyDown={handleKeyDown}>
       <div className="settings-header">
         <div className="settings-title-group"><h2>Settings</h2><span className="settings-subtitle">Make Crumb feel like your workspace</span></div>
-        <button className="settings-close-btn" onClick={onClose} aria-label="Close settings"><CloseIcon width={16} height={16} /></button>
+        <button className="settings-close-btn" onClick={() => onClose('cancel')} aria-label="Close settings"><CloseIcon width={16} height={16} /></button>
       </div>
       <div className="settings-tabs" role="tablist" aria-label="Settings sections">
         {tabs.map((name, index) => <button key={name} id={`settings-tab-${name}`} role="tab" aria-selected={tab === name} aria-controls={`settings-panel-${name}`} tabIndex={tab === name ? 0 : -1}
@@ -104,7 +109,7 @@ export default function SettingsModal({ themes, currentThemeId, onThemeChange, o
               </select>
             </div>
             <div className="settings-row">
-              <div className="settings-row-label"><label htmlFor="font-size-slider">Font size ({fontSize}px)</label><small>10–24px · Ctrl+Shift+= / −</small></div>
+              <div className="settings-row-label"><label htmlFor="font-size-slider">Font size ({fontSize}px)</label><small>10–24px · {shortcutLabel('Shift+=')} / {shortcutLabel('Shift+−')}</small></div>
               <div className="settings-row-control font-size-control">
                 <input id="font-size-slider" type="range" min="10" max="24" value={fontSize} onChange={event => onFontSizeChange(Number(event.target.value))} className="settings-range" />
                 <input type="number" aria-label="Font size in pixels" min="10" max="24" value={fontSize} onChange={event => onFontSizeChange(Math.min(24, Math.max(10, Number(event.target.value))))} className="settings-number-input" />
@@ -119,9 +124,11 @@ export default function SettingsModal({ themes, currentThemeId, onThemeChange, o
           {([
             ['lineNumbers', 'Line numbers', 'Keep code-folding controls visible when numbers are hidden'],
             ['bracketMatching', 'Bracket matching', 'Highlight the matching bracket near the cursor'],
+            ['indentGuides', 'Indentation guides', 'Show vertical guides at code indentation levels'],
             ['autoCloseBrackets', 'Auto-close brackets', 'Insert closing brackets and quotes as you type'],
             ['highlightActiveLine', 'Highlight active line', 'Highlight the current line and its line number'],
           ] as const).map(([key, label, description]) => <Toggle key={key} id={`editor-${key}`} label={label} description={description} checked={editorPreferences[key]} onChange={checked => onEditorPreferencesChange({ ...editorPreferences, [key]: checked })} />)}
+          <Toggle id="editor-vim-mode" label="Vim mode" description="Use Vim-style modes and commands in the code editor." descriptionId="editor-vim-mode-description" checked={editorPreferences.vimModeEnabled} onChange={checked => onEditorPreferencesChange({ ...editorPreferences, vimModeEnabled: checked })} />
           <Toggle id="word-wrap-toggle" label="Word wrap" description="Wrap long lines to the editor width" checked={wordWrap} onChange={onWordWrapChange} />
           <div className="settings-row"><label htmlFor="indent-size">Indent size</label><select id="indent-size" className="settings-select" value={editorPreferences.indentSize} onChange={event => onEditorPreferencesChange({ ...editorPreferences, indentSize: Number(event.target.value) as 2 | 3 | 4 })}>{[2, 3, 4].map(size => <option key={size} value={size}>{size}</option>)}</select></div>
           <div className="settings-row"><label htmlFor="indent-with">Indent with</label><select id="indent-with" className="settings-select" value={editorPreferences.indentWith} onChange={event => onEditorPreferencesChange({ ...editorPreferences, indentWith: event.target.value as 'spaces' | 'tabs' })}><option value="spaces">Spaces</option><option value="tabs">Tabs</option></select></div>
@@ -138,7 +145,7 @@ export default function SettingsModal({ themes, currentThemeId, onThemeChange, o
           <div className="settings-row"><div className="settings-row-label"><span>Reset layout</span><small>Restore panel sizes and visibility, Explorer, and split widths. Your files, theme, font, and zoom are unchanged.</small></div><button className="settings-done-btn" onClick={onResetLayout}>Reset layout</button></div>
         </section>}
       </div>
-      <div className="settings-footer"><button className="settings-done-btn" onClick={onClose}>Done</button></div>
+      <div className="settings-footer"><button className="settings-done-btn" onClick={() => onClose('cancel')}>Done</button></div>
     </div>
   </div>;
 }

@@ -7,6 +7,7 @@ Crumb is a cross-platform code editor inspired by VS Code. It features a code ed
 ## Features
 
 - **Code editor** powered by CodeMirror 6 with syntax highlighting selected from the file name
+- **Indentation guides** — subtle vertical lines that respect indentation width and tabs, including through blank lines. Enabled by default; toggle them in Settings → Editor.
 - **File explorer** sidebar with recursive folder browsing
 - **Integrated terminal** panel with support for multiple terminals and split views; new terminals start in the Explorer folder
 - **Resizable panels** — drag the sidebar and bottom panel edges, or toggle them independently
@@ -56,15 +57,18 @@ npm run tauri:dev
 - `Ctrl/Cmd + 0` — Reset interface zoom to 100%
 - `Ctrl/Cmd + Shift + 0` — Reset editor and terminal font size to 13px
 - `Ctrl/Cmd + O` — Open a file
-- `Ctrl/Cmd + P` — Search filenames in the open folder and open tabs
+- `Ctrl/Cmd + P` — Search filenames in the open folder and open tabs. On Windows/Linux, keep holding `Ctrl` and press `P` again to move down the results, wrapping from the last file to the first; releasing `Ctrl` after at least one extra press opens the selected file. The press that opens the picker never opens a file on release, and `Cmd + P` on macOS keeps its existing open-only behavior.
 - `Ctrl/Cmd + S` — Save file
 - `Ctrl/Cmd + N` — New untitled tab
 - `Ctrl/Cmd + W` — Close the current tab (prompts for unsaved changes)
 - `Ctrl/Cmd + Tab` — Switch tabs (`Shift` goes backward)
-- `Ctrl/Cmd + B` — Toggle file explorer sidebar
-- `Ctrl/Cmd + J` — Toggle bottom panel (terminal / output / problems)
-- `Ctrl + \`` — Open and focus the terminal; press again to return to the editor
+- `Ctrl/Cmd + B` — Toggle sidebar visibility without changing the active Explorer or Search tab. `Ctrl + B` also works from the Search query and a focused Vim editor, where it takes precedence over Vim's Ctrl-B page-back; `Ctrl + Shift + B` is not a sidebar shortcut.
+- `Ctrl + Shift + E` — Show the Explorer, or hide the sidebar when Explorer is already active. When Search is the active sidebar tab, this switches to Explorer instead of closing. This works from a focused Vim editor (Normal or Insert) and from the Search query input.
+- `Ctrl + Shift + F` — Toggle Search in Files and focus the query. Pressing it while Search is active closes the sidebar and returns focus to the editor. These sidebar chords are `Ctrl`-only and do not use `Meta`/`Super` or `Alt`; plain `Ctrl + E` is not a Crumb shortcut.
+- `Ctrl + \`` — Toggle the bottom panel; opening selects Terminal and focuses its input, closing returns to the editor
 - `Ctrl/Cmd + Shift + P` — Open the command palette
+
+`Ctrl+H`, `Ctrl+J`, `Ctrl+K`, and `Ctrl+L` are not Crumb or editor shortcuts. They are left to focused terminals and ordinary text inputs, and are swallowed in the editor so CodeMirror/Vim defaults cannot edit or navigate the document.
 
 ## Themes and commands
 
@@ -82,7 +86,7 @@ Word wrap is on by default and can be toggled through **Editor: Enable/Disable W
 
 When a Markdown file is active, the top bar shows **Preview**. It opens a rendered pane beside the editors and updates as you type. The preview supports GitHub-style tables and task lists, images stored beside the file, and links. Click **Preview** again to close that pane. A Markdown preview can stay open while you add more editor splits. The same action is available in the command palette.
 
-Opening a folder with **Open Folder** also opens and focuses a new terminal in that folder. **Terminal folder** only changes the Explorer folder. The top search bar finds files by name in the open folder; unsupported file types open as plain text.
+Opening a folder with **Open Folder** updates the Explorer and recent projects without opening, focusing, or spawning a terminal. **Terminal folder** only changes the Explorer folder. The top search bar finds files by name in the open folder; unsupported file types open as plain text.
 
 The color palettes are inspired by [One Dark Pro](https://github.com/Binaryify/OneDark-Pro), [Dracula](https://github.com/dracula/dracula-theme), [Catppuccin](https://github.com/catppuccin/palette), [Nord](https://github.com/nordtheme/nord), [Tokyo Night](https://github.com/enkia/tokyo-night-vscode-theme), [Gruvbox](https://github.com/morhetz/gruvbox), [Rosé Pine](https://github.com/rose-pine/rose-pine-theme), and [Solarized](https://github.com/altercation/solarized). Crumb arranges interface colors for its own layout. Bundled fonts are Inter, Space Grotesk, JetBrains Mono, IBM Plex Mono, and Fira Code.
 

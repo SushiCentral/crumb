@@ -20,6 +20,10 @@ interface SearchPanelProps {
   rootPath: string | null;
   onOpenFile: (path: string, lineNumber?: number) => void;
   onClose?: () => void;
+  onExitToEditor?: () => void;
+  /** Literal query requested by the editor (Vim Space `s w`). */
+  request?: { term: string; id: number } | null;
+  onRequestConsumed?: () => void;
 }
 
 const IGNORED_DIRS = new Set([
@@ -38,7 +42,7 @@ const MAX_TOTAL_MATCHES = 500;
 const MAX_FILES_SCANNED = 2000;
 const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024; // 2MB
 
-export default function SearchPanel({ rootPath, onOpenFile, onClose }: SearchPanelProps) {
+export default function SearchPanel({ rootPath, onOpenFile, onClose, onExitToEditor, request, onRequestConsumed }: SearchPanelProps) {
   const [query, setQuery] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [isRegex, setIsRegex] = useState(false);
@@ -47,6 +51,7 @@ export default function SearchPanel({ rootPath, onOpenFile, onClose }: SearchPan
   const [results, setResults] = useState<FileSearchResult[]>([]);
   const [searched, setSearched] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const searchRunRef = useRef(0);
 
@@ -62,9 +67,9 @@ export default function SearchPanel({ rootPath, onOpenFile, onClose }: SearchPan
     setStatusMessage(null);
   }, [rootPath]);
 
-  const buildSearchRegex = (term: string) => {
+  const buildSearchRegex = (term: string, regexEnabled = isRegex) => {
     try {
-      let pattern = isRegex ? term : term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      let pattern = regexEnabled ? term : term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       if (wholeWord) {
         pattern = `\\b${pattern}\\b`;
       }
@@ -80,10 +85,10 @@ export default function SearchPanel({ rootPath, onOpenFile, onClose }: SearchPan
     setStatusMessage('Search cancelled.');
   };
 
-  const executeSearch = async () => {
+  const executeSearch = async (termOverride?: string, regexEnabled = isRegex) => {
     const runId = ++searchRunRef.current;
     const isCurrent = () => runId === searchRunRef.current;
-    const term = query.trim();
+    const term = (termOverride ?? query).trim();
     if (!term || !rootPath) {
       setResults([]);
       setSearched(false);
@@ -92,7 +97,7 @@ export default function SearchPanel({ rootPath, onOpenFile, onClose }: SearchPan
       return;
     }
 
-    const regex = buildSearchRegex(term);
+    const regex = buildSearchRegex(term, regexEnabled);
     if (!regex) {
       setIsSearching(false);
       setStatusMessage('Invalid regular expression syntax.');
@@ -100,6 +105,7 @@ export default function SearchPanel({ rootPath, onOpenFile, onClose }: SearchPan
     }
 
     setIsSearching(true);
+    setActiveMatchId(null);
     setResults([]);
     setStatusMessage(null);
     setSearched(true);
@@ -213,6 +219,18 @@ export default function SearchPanel({ rootPath, onOpenFile, onClose }: SearchPan
     }
   };
 
+  useEffect(() => {
+    if (!request) return;
+    // Run on every request effect setup, including StrictMode's development
+    // remount. The mount cleanup invalidates any in-flight run, and a consumed
+    // id must not block the re-setup from starting the search again. The word is
+    // searched literally, so an enabled regex mode must not reinterpret it.
+    setIsRegex(false);
+    setQuery(request.term);
+    void executeSearch(request.term, false);
+    onRequestConsumed?.();
+  }, [request]);
+
   const toggleExpand = (filePath: string) => {
     setResults(prev =>
       prev.map(item =>
@@ -220,6 +238,21 @@ export default function SearchPanel({ rootPath, onOpenFile, onClose }: SearchPan
       )
     );
   };
+
+  const visibleMatches = results.flatMap((result, fileIndex) => result.expanded
+    ? result.matches.map((match, matchIndex) => ({
+        id: `search-match-${fileIndex}-${matchIndex}`,
+        filePath: result.filePath,
+        match,
+      }))
+    : []);
+  const activeMatchIndex = visibleMatches.findIndex(item => item.id === activeMatchId);
+  const activeMatch = activeMatchIndex >= 0 ? visibleMatches[activeMatchIndex] : null;
+
+  useEffect(() => {
+    if (!activeMatch) return;
+    document.getElementById(activeMatch.id)?.scrollIntoView({ block: 'nearest' });
+  }, [activeMatchId, activeMatch]);
 
   return (
     <div className="search-panel">
@@ -238,11 +271,32 @@ export default function SearchPanel({ rootPath, onOpenFile, onClose }: SearchPan
             ref={inputRef}
             className="search-input"
             type="text"
+            role="combobox"
+            aria-label="Search in files"
+            aria-expanded={results.length > 0}
+            aria-controls="search-results-list"
+            aria-activedescendant={activeMatch?.id}
             placeholder="Search in files…"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => { setQuery(e.target.value); setActiveMatchId(null); }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') void executeSearch();
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                onExitToEditor?.();
+              } else if (e.key === 'ArrowDown' && visibleMatches.length > 0) {
+                e.preventDefault();
+                setActiveMatchId(visibleMatches[Math.min(activeMatchIndex + 1, visibleMatches.length - 1)].id);
+              } else if (e.key === 'ArrowUp' && activeMatchIndex >= 0) {
+                e.preventDefault();
+                setActiveMatchId(activeMatchIndex === 0 ? null : visibleMatches[activeMatchIndex - 1].id);
+              } else if (e.key === 'Enter') {
+                if (activeMatch) {
+                  e.preventDefault();
+                  onOpenFile(activeMatch.filePath, activeMatch.match.lineNumber);
+                } else {
+                  void executeSearch();
+                }
+              }
             }}
           />
           <div className="search-options">
@@ -296,26 +350,31 @@ export default function SearchPanel({ rootPath, onOpenFile, onClose }: SearchPan
         </div>
       )}
 
-      <div className="search-results-list">
-        {results.map((res) => (
-          <div key={res.filePath} className="search-file-group">
-            <div
+      <div className="search-results-list" id="search-results-list" role="listbox" aria-label="Search results">
+        {results.map((res, fileIndex) => (
+          <div key={res.filePath} className="search-file-group" role="group" aria-label={res.filePath}>
+            <button
+              type="button"
               className="search-file-header"
               onClick={() => toggleExpand(res.filePath)}
               title={res.filePath}
+              aria-expanded={res.expanded}
             >
               <span className="search-chevron">{res.expanded ? '▾' : '▸'}</span>
               <FileIcon width={14} height={14} className="search-file-icon" />
               <span className="search-file-name">{res.fileName}</span>
               <span className="search-badge">{res.matches.length}</span>
-            </div>
+            </button>
 
             {res.expanded && (
               <div className="search-file-matches">
                 {res.matches.map((m, idx) => (
                   <div
                     key={`${m.lineNumber}-${idx}`}
-                    className="search-match-row"
+                    id={`search-match-${fileIndex}-${idx}`}
+                    className={`search-match-row${activeMatchId === `search-match-${fileIndex}-${idx}` ? ' active' : ''}`}
+                    role="option"
+                    aria-selected={activeMatchId === `search-match-${fileIndex}-${idx}`}
                     onClick={() => onOpenFile(res.filePath, m.lineNumber)}
                     title={`Line ${m.lineNumber}: ${m.lineContent}`}
                   >

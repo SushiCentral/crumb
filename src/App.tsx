@@ -1,30 +1,101 @@
-import { Fragment, lazy, Suspense, useState, useEffect, useMemo, useRef } from "react";
+import { Fragment, lazy, startTransition, Suspense, useState, useEffect, useMemo, useRef } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeTextFile, stat } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { shortcutLabel } from './lib/platform';
 import { scaleShortcut, nextZoom } from './lib/scale-shortcuts';
-import { readNumber, readBoolean, clampPanelHeight, clampSidebarWidth, readEditorPreferences, lineEnding } from './lib/preferences';
-import type { CursorInfo } from './lib/editor-extensions';
-import StatusBar from './components/StatusBar';
+import { defaultSidebarWidth, readNumber, readBoolean, clampPanelHeight, clampSidebarWidth, readEditorPreferences, lineEnding } from './lib/preferences';
+import { createVimSession } from './lib/vim/session';
+import type { VimPublicState } from './lib/vim/extension';
+import type { VimFlashState } from './lib/vim/jump';
+import type { VimLeaderAction } from './lib/vim/leader';
+import { shouldVimOwnShortcut, type VimFocusedSurface } from './lib/vim/shortcuts';
+import { isEditorReservedCtrlKey, type CursorInfo } from './lib/editor-extensions';
+import StatusBar, { type VimStatus } from './components/StatusBar';
 import { parseRecentProjects, recordProject, type RecentProject } from './lib/recent-projects';
-import Editor, { type EditorHandle } from "./components/Editor";
+import Editor, { type EditorHandle, type VimEditorTarget } from "./components/Editor";
 import BottomPanel from "./components/BottomPanel";
 import FileExplorer from "./components/FileExplorer";
 import SearchPanel from "./components/SearchPanel";
-import SettingsModal from "./components/SettingsModal";
+import SettingsModal, { type SettingsCloseReason } from "./components/SettingsModal";
 import WelcomeScreen from "./components/WelcomeScreen";
 import ToastContainer, { type ToastMessage } from "./components/Toast";
-import CommandPalette, { type PaletteCommand } from "./components/CommandPalette";
-import QuickOpen, { type QuickOpenHandle } from "./components/QuickOpen";
+import CommandPalette, { type PaletteCommand, type CommandPaletteCloseReason } from "./components/CommandPalette";
+import QuickOpen, { type QuickOpenHandle, type QuickOpenDismissReason } from "./components/QuickOpen";
 import { codeFonts, getTheme, themes, themeVariables } from "./lib/themes";
 import { languageName } from "./lib/languages";
-import { FolderIcon, SearchIcon, SettingsIcon, SplitPreviewIcon } from "./components/Icons";
+import { FolderIcon, KeyboardIcon, SearchIcon, SettingsIcon, SplitPreviewIcon } from "./components/Icons";
 import "./App.css";
 
-const initialDoc = `// Welcome to Crumb\n\nfunction hello() {\n  console.log("Hello, world!");\n}\n`;
 const MarkdownPreview = lazy(() => import('./components/MarkdownPreview'));
 const isMarkdownPath = (path: string | null) => path != null && /\.(md|markdown)$/i.test(path);
+const isMacPlatform = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+interface FocusedSurfaceFlags {
+  paletteOpen: boolean;
+  dialogOpen: boolean;
+}
+
+/**
+ * Classify the element that currently owns keyboard input. Vim may only take
+ * shortcuts when the real editor content is focused; prompts, panels, dialogs,
+ * the terminal, and ordinary inputs keep their own key handling.
+ */
+function focusedSurfaceFor(element: Element | null, flags: FocusedSurfaceFlags): VimFocusedSurface {
+  if (flags.paletteOpen) return 'palette';
+  if (flags.dialogOpen) return 'dialog';
+  if (!element) return 'other';
+
+  if (element.closest('.xterm')) return 'terminal';
+  if (element.closest('.command-palette, .palette-overlay')) return 'palette';
+  if (element.closest('.settings-overlay, .settings-modal, [role="dialog"]')) return 'dialog';
+  if (element.closest('.cm-editor')) {
+    // Vim prompts and CodeMirror panels are rendered inside the editor DOM,
+    // but their inputs must not be treated as the editor surface.
+    return element.matches('input, textarea, select') || element.closest('.cm-panel')
+      ? 'input'
+      : 'editor';
+  }
+  if (element.matches('input, textarea, select, [contenteditable="true"]')) return 'input';
+  return 'other';
+}
+
+/**
+ * Ctrl bindings that Vim treats as buffer/window commands and that Crumb's
+ * App would otherwise interpret as document commands. When focus belongs to a
+ * terminal or a Vim prompt input, these keys belong to that input instead.
+ * Keep this set aligned with VIM_BUILTIN_CTRL_KEYS in lib/vim/shortcuts.ts.
+ * Ctrl-B is deliberately absent: Crumb reserves it for the sidebar visibility
+ * toggle in editors and the Search query. Ordinary inputs and terminals fall
+ * through to the toggle gate and keep Ctrl-B when it is not allowed.
+ * Ctrl-H/J/K/L are handled separately: they are reserved in editors and never
+ * claimed by App, so terminals and native inputs receive them unchanged.
+ */
+const INPUT_OWNED_VIM_CTRL_KEYS: ReadonlySet<string> = new Set([
+  'w', 'o', 'n', 'p',
+]);
+
+function isInputOwnedVimCtrlKey(event: KeyboardEvent): boolean {
+  return event.ctrlKey
+    && !event.metaKey
+    && !event.altKey
+    && !event.shiftKey
+    && INPUT_OWNED_VIM_CTRL_KEYS.has(event.key.toLowerCase());
+}
+
+/**
+ * The Vim lifecycle exposes one pending status string (counts, register, and
+ * command prefix combined). Forward it as the pending command field; mode is
+ * the typed lifecycle mode. Inactive editors have no status bar entry.
+ */
+function toStatusBarVimStatus(state: VimPublicState | undefined): VimStatus | undefined {
+  if (!state || state.mode === 'inactive') return undefined;
+  return {
+    mode: state.mode,
+    pending: state.pending ? { command: state.pending } : undefined,
+  };
+}
 
 interface EditorTab {
   id: string;
@@ -51,8 +122,17 @@ interface PendingCloseOperation {
   index: number;
 }
 
+/**
+ * A deferred focus destination. Pane IDs are exact; tab IDs let a newly opened
+ * document resolve its pane after React mounts the destination EditorView.
+ */
+interface EditorFocusTarget {
+  paneId?: string | null;
+  tabId?: string | null;
+}
+
 const newUntitledTab = (): EditorTab => ({
-  id: crypto.randomUUID(), path: null, content: initialDoc, savedContent: initialDoc,
+  id: crypto.randomUUID(), path: null, content: '', savedContent: '',
 });
 
 const readPreference = (key: string, fallback: string) => {
@@ -66,14 +146,16 @@ const getFileNameFromPath = (path: string | null) => {
 };
 
 export default function App() {
-  const [isPanelOpen, setIsPanelOpen] = useState(true);
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<'explorer' | 'search'>(() => readPreference('crumb.sidebarTab', 'explorer') === 'search' ? 'search' : 'explorer');
-  const [sidebarWidth, setSidebarWidth] = useState(() => clampSidebarWidth(readNumber(readPreference('crumb.sidebarWidth', ''), 280, 160, 10000), window.innerWidth));
+  const [sidebarWidth, setSidebarWidth] = useState(() => clampSidebarWidth(readNumber(readPreference('crumb.sidebarWidth', ''), defaultSidebarWidth, 160, 10000), window.innerWidth));
   const [panelHeight, setPanelHeight] = useState(() => clampPanelHeight(readNumber(readPreference('crumb.panelHeight', ''), Math.round(window.innerHeight * 0.4), 0, 10000), window.innerHeight));
   const [zoomLevel, setZoomLevel] = useState(() => readNumber(readPreference('crumb.zoom', ''), 1, 0.5, 2));
   const [explorerRootPath, setExplorerRootPath] = useState<string | null>(null);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+  const [paletteInitialMode, setPaletteInitialMode] = useState<'commands' | 'files'>('commands');
+  const [paletteMode, setPaletteMode] = useState<'commands' | 'files'>('commands');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>(() => parseRecentProjects(readPreference('crumb.recentProjects', '[]')));
@@ -90,8 +172,11 @@ export default function App() {
   });
   const [wordWrap, setWordWrap] = useState(() => readPreference('crumb.wordWrap', 'true') !== 'false');
   const [editorPreferences, setEditorPreferences] = useState(() => readEditorPreferences(key => readPreference(key, '')));
+  const [vimSession] = useState(() => createVimSession());
   const [clearPromptOnStart, setClearPromptOnStart] = useState(() => readBoolean(readPreference('crumb.terminalClearPrompt', ''), false));
   const [paneCursors, setPaneCursors] = useState<Record<string, CursorInfo>>({});
+  const [paneVimStates, setPaneVimStates] = useState<Record<string, VimPublicState>>({});
+  const [paneFlashStates, setPaneFlashStates] = useState<Record<string, { tabId: string; state: VimFlashState }>>({});
 
   // Empty workspace state: start with 0 tabs so Welcome Screen is displayed first
   const [tabs, setTabs] = useState<EditorTab[]>([]);
@@ -105,18 +190,24 @@ export default function App() {
   const [pendingCloseOperation, setPendingCloseOperation] = useState<PendingCloseOperation | null>(null);
   const currentPendingCloseId = pendingCloseOperation?.dirtyTabIds[pendingCloseOperation.index] ?? null;
 
+  // A Space `s w` request hands a literal query to the Search sidebar. The
+  // monotonically increasing id lets an already-mounted panel consume repeats.
+  const [searchRequest, setSearchRequest] = useState<{ term: string; id: number } | null>(null);
+
   const [activeTerminalSessionId, setActiveTerminalSessionId] = useState<string | null>(null);
   const [terminalFocusRequest, setTerminalFocusRequest] = useState(0);
-  const [openTerminalRequest, setOpenTerminalRequest] = useState<{ path: string; sequence: number } | null>(null);
   const [terminalFolderError, setTerminalFolderError] = useState<string | null>(null);
 
   const tabsRef = useRef(tabs);
   const zoomQueueRef = useRef(Promise.resolve());
-  const previousZoomRef = useRef(zoomLevel);
-  const previousFontSizeRef = useRef(fontSize);
   const activeTabIdRef = useRef(activeTabId);
   const panesRef = useRef(panes);
   const activePaneIdRef = useRef(activePaneId);
+  const isSidebarOpenRef = useRef(isSidebarOpen);
+  const sidebarTabRef = useRef(sidebarTab);
+  const pendingCloseOperationRef = useRef(pendingCloseOperation);
+  const isCloseAllConfirmationOpenRef = useRef(isCloseAllConfirmationOpen);
+  const searchRequestIdRef = useRef(0);
   const editorRefs = useRef(new Map<string, EditorHandle>());
   const workspaceRef = useRef<HTMLDivElement>(null);
   const sidebarContainerRef = useRef<HTMLDivElement>(null);
@@ -124,8 +215,22 @@ export default function App() {
 
   const splitDragRef = useRef<{ leftId: string; rightId: string; startX: number; leftWidth: number; rightWidth: number } | null>(null);
   const quickOpenRef = useRef<QuickOpenHandle>(null);
+  const commandTriggerRef = useRef<HTMLButtonElement>(null);
+  const tabMenuRef = useRef<HTMLDivElement>(null);
   const sidebarDraggingRef = useRef(false);
   const panelDraggingRef = useRef(false);
+
+  // Focus restoration is intent-based: remember which editor invoked the
+  // surface, and only move focus when the user cancels or runs a command that
+  // does not hand off to another destination.
+  const focusInvokerPaneRef = useRef<string | null>(null);
+  const lastFocusedEditorPaneRef = useRef<string | null>(null);
+  const pendingEditorFocusRef = useRef<{ token: number; target: EditorFocusTarget } | null>(null);
+  const editorFocusTokenRef = useRef(0);
+  const programmaticEditorFocusRef = useRef(false);
+  // Monotonic user-interaction clock. Asynchronous handlers capture this before
+  // awaiting and validate it before moving focus when they finish.
+  const userInteractionEpochRef = useRef(0);
 
   const currentDragWidthRef = useRef<number>(sidebarWidth);
   const currentDragHeightRef = useRef<number>(panelHeight);
@@ -134,10 +239,20 @@ export default function App() {
   activeTabIdRef.current = activeTabId;
   panesRef.current = panes;
   activePaneIdRef.current = activePaneId;
+  isSidebarOpenRef.current = isSidebarOpen;
+  sidebarTabRef.current = sidebarTab;
+  pendingCloseOperationRef.current = pendingCloseOperation;
+  isCloseAllConfirmationOpenRef.current = isCloseAllConfirmationOpen;
 
   const activeTab = tabs.find(tab => tab.id === activeTabId);
   const activeLineEnding = useMemo(() => activeTab ? lineEnding(activeTab.content) : '—', [activeTab?.content]);
   const activeCursor = paneCursors[activePaneId] ?? paneCursors[panes.find(pane => pane.kind === 'editor' && pane.tabId === activeTabId)?.id ?? ''];
+  const activeVimState = editorPreferences.vimModeEnabled ? paneVimStates[activePaneId] : undefined;
+  const vimStatus = toStatusBarVimStatus(activeVimState);
+  const activeFlashEntry = paneFlashStates[activePaneId];
+  const flashStatus = editorPreferences.vimModeEnabled && activeFlashEntry?.tabId === activeTabId
+    ? activeFlashEntry.state
+    : undefined;
   const canPreviewMarkdown = activeTab ? isMarkdownPath(activeTab.path) : false;
   const isPreviewOpen = canPreviewMarkdown && panes.some(pane => pane.kind === 'preview' && pane.tabId === activeTab?.id);
 
@@ -146,6 +261,13 @@ export default function App() {
       workspaceRef.current?.querySelector<HTMLElement>(`[data-pane-id="${activePaneId}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
   }, [activePaneId, panes.length]);
+
+  useEffect(() => {
+    if (!tabMenu) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    tabMenuRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    return () => { if (previousFocus?.isConnected) previousFocus.focus(); };
+  }, [tabMenu]);
 
   const addToast = (message: string, type: ToastMessage['type'] = 'info') => {
     const id = crypto.randomUUID();
@@ -163,16 +285,54 @@ export default function App() {
   }, [editorPreferences]);
 
   useEffect(() => {
+    vimSession.reconcileDocuments(tabs.map(tab => tab.id));
+  }, [vimSession, tabs]);
+
+  useEffect(() => {
+    const activePane = panes.find(pane => pane.id === activePaneId);
+    vimSession.requestOwner(activePane?.kind === 'editor' ? activePane.id : null);
+  }, [vimSession, activePaneId, panes]);
+
+  useEffect(() => {
     try { localStorage.setItem('crumb.terminalClearPrompt', String(clearPromptOnStart)); } catch {}
   }, [clearPromptOnStart]);
 
   useEffect(() => { if (!isSettingsOpen) setPreviewThemeId(null); }, [isSettingsOpen]);
 
   const reportCursor = (paneId: string, cursor: CursorInfo) => {
-    setPaneCursors(previous => {
+    // This snapshot only feeds the status bar. Keep its whole-App render
+    // interruptible so held cursor keys take priority over reporting them.
+    // Shortcut routing reads the live editor state, not this snapshot.
+    startTransition(() => {
+      setPaneCursors(previous => {
+        const old = previous[paneId];
+        return old?.line === cursor.line && old.column === cursor.column && old.selected === cursor.selected
+          ? previous : { ...previous, [paneId]: cursor };
+      });
+    });
+  };
+
+  const reportVimState = (paneId: string, state: VimPublicState) => {
+    setPaneVimStates(previous => {
       const old = previous[paneId];
-      return old?.line === cursor.line && old.column === cursor.column && old.selected === cursor.selected
-        ? previous : { ...previous, [paneId]: cursor };
+      return old?.mode === state.mode && old.pending === state.pending
+        ? previous : { ...previous, [paneId]: state };
+    });
+  };
+
+  const reportFlashState = (paneId: string, tabId: string, state: VimFlashState | null) => {
+    setPaneFlashStates(previous => {
+      const old = previous[paneId];
+      if (state === null) {
+        if (!old || old.tabId !== tabId) return previous;
+        const next = { ...previous };
+        delete next[paneId];
+        return next;
+      }
+      if (old?.tabId === tabId && old.state.query === state.query && old.state.matchCount === state.matchCount) {
+        return previous;
+      }
+      return { ...previous, [paneId]: { tabId, state } };
     });
   };
 
@@ -189,14 +349,7 @@ export default function App() {
     zoomQueueRef.current = zoomQueueRef.current
       .then(() => getCurrentWebview().setZoom(zoomLevel))
       .catch(error => { console.error('Could not scale the interface:', error); });
-    if (previousZoomRef.current !== zoomLevel) addToast(`Zoom ${Math.round(zoomLevel * 100)}%`);
-    previousZoomRef.current = zoomLevel;
   }, [zoomLevel]);
-
-  useEffect(() => {
-    if (previousFontSizeRef.current !== fontSize) addToast(`Font ${fontSize}px`);
-    previousFontSizeRef.current = fontSize;
-  }, [fontSize]);
 
   useEffect(() => {
     const resize = () => {
@@ -208,7 +361,7 @@ export default function App() {
   }, []);
 
   const resetLayout = () => {
-    setSidebarWidth(clampSidebarWidth(280, window.innerWidth));
+    setSidebarWidth(clampSidebarWidth(defaultSidebarWidth, window.innerWidth));
     setPanelHeight(clampPanelHeight(Math.round(window.innerHeight * 0.4), window.innerHeight));
     setSidebarTab('explorer');
     setIsSidebarOpen(true);
@@ -251,8 +404,284 @@ export default function App() {
     if (editor) editorRefs.current.get(editor.id)?.focus();
   };
 
-  const openInSplit = (tabId: string, kind: EditorPane['kind'] = 'editor') => {
-    if (tabsRef.current.length === 0) return;
+  const editorPaneForTarget = (target: EditorFocusTarget = {}): EditorPane | undefined => {
+    const panes = panesRef.current;
+    if (target.paneId) {
+      return panes.find(pane => pane.id === target.paneId && pane.kind === 'editor');
+    }
+    if (target.tabId) {
+      return panes.find(pane => pane.kind === 'editor' && pane.tabId === target.tabId)
+        ?? panes.find(pane => pane.kind === 'editor' && pane.tabIds.includes(target.tabId!));
+    }
+    return panes.find(pane => pane.id === activePaneIdRef.current && pane.kind === 'editor')
+      ?? panes.find(pane => pane.kind === 'editor');
+  };
+
+  const paneElement = (paneId: string) =>
+    workspaceRef.current?.querySelector<HTMLElement>(`[data-pane-id="${paneId}"]`) ?? null;
+
+  const cancelPendingEditorFocus = () => {
+    editorFocusTokenRef.current += 1;
+    pendingEditorFocusRef.current = null;
+  };
+
+  /**
+   * Focus an editor only once its EditorView is mounted. The pending request is
+   * invalidated by any later user focus interaction, so a stale tab click or
+   * pointer press wins over an older deferred restoration.
+   */
+  const requestEditorFocus = (target: EditorFocusTarget, interactionEpoch?: number) => {
+    if (interactionEpoch !== undefined && interactionEpoch !== userInteractionEpochRef.current) return;
+    // A caller that captured the interaction epoch has already validated that
+    // no newer pointer/focus decision occurred. In that case a focused source
+    // control (for example the Explorer row that opened the file) is the
+    // intent itself, not evidence that the user moved elsewhere.
+    const intentValidated = interactionEpoch !== undefined;
+    const token = editorFocusTokenRef.current + 1;
+    editorFocusTokenRef.current = token;
+    pendingEditorFocusRef.current = { token, target };
+    let attempts = 0;
+
+    const attempt = () => {
+      if (editorFocusTokenRef.current !== token) return;
+      const pane = editorPaneForTarget(target);
+      const element = pane ? paneElement(pane.id) : null;
+      const active = document.activeElement;
+      const focusMovedElsewhere = !intentValidated
+        && active instanceof HTMLElement
+        && active !== document.body
+        && !element?.contains(active);
+      if (focusMovedElsewhere) {
+        // A click, Tab, or other focus request happened after the surface
+        // closed. Leave focus where the user put it.
+        pendingEditorFocusRef.current = null;
+        editorFocusTokenRef.current += 1;
+        return;
+      }
+
+      const handle = pane ? editorRefs.current.get(pane.id) : undefined;
+      if (handle) {
+        programmaticEditorFocusRef.current = true;
+        try { handle.focus(); } finally { programmaticEditorFocusRef.current = false; }
+        const focused = document.activeElement;
+        if (focused instanceof Element && focused.closest('.cm-content') && (!element || element.contains(focused))) {
+          pendingEditorFocusRef.current = null;
+          return;
+        }
+      }
+
+      attempts += 1;
+      if (attempts < 90 && editorFocusTokenRef.current === token) {
+        setTimeout(attempt, 16);
+      } else if (editorFocusTokenRef.current === token) {
+        pendingEditorFocusRef.current = null;
+      }
+    };
+
+    // Let React unmount the closing palette/dialog before evaluating whether
+    // focus was already claimed by another control.
+    setTimeout(attempt, 0);
+  };
+
+  const focusedEditorPaneId = (): string | null => {
+    const active = document.activeElement;
+    const owner = active instanceof Element ? active.closest<HTMLElement>('[data-pane-id]') : null;
+    const focusedPaneId = owner?.dataset.paneId;
+    if (focusedPaneId && panesRef.current.some(pane => pane.id === focusedPaneId && pane.kind === 'editor')) {
+      return focusedPaneId;
+    }
+    const activePane = panesRef.current.find(pane => pane.id === activePaneIdRef.current && pane.kind === 'editor');
+    if (activePane) return activePane.id;
+    const lastFocused = panesRef.current.find(pane => pane.id === lastFocusedEditorPaneRef.current && pane.kind === 'editor');
+    if (lastFocused) return lastFocused.id;
+    return panesRef.current.find(pane => pane.kind === 'editor')?.id ?? null;
+  };
+
+  /**
+   * Return to the active editor after a sidebar action. Unlike the palette
+   * invoker path this resolves the current editor pane directly, so it remains
+   * reliable when focus already moved back to the editor (or came from a
+   * sidebar control) while a sidebar tab is still open.
+   */
+  const focusActiveEditorFromSidebar = () => {
+    const paneId = focusedEditorPaneId();
+    if (!paneId) return;
+    // The current epoch marks this as an explicit intent, so a focused sidebar
+    // control does not cancel the handoff before the editor view is ready.
+    requestEditorFocus({ paneId }, userInteractionEpochRef.current);
+  };
+
+  const rememberFocusInvoker = (): string | null => {
+    focusInvokerPaneRef.current = focusedEditorPaneId();
+    return focusInvokerPaneRef.current;
+  };
+
+  const restoreInvokerFocus = () => {
+    if (focusInvokerPaneRef.current) requestEditorFocus({ paneId: focusInvokerPaneRef.current });
+  };
+
+  const openPalette = () => {
+    rememberFocusInvoker();
+    setPaletteInitialMode('commands');
+    setPaletteMode('commands');
+    setIsPaletteOpen(true);
+  };
+
+  const openQuickOpen = () => {
+    rememberFocusInvoker();
+    setPaletteInitialMode('files');
+    setPaletteMode('files');
+    setIsPaletteOpen(true);
+  };
+
+  const closePalette = (reason: CommandPaletteCloseReason) => {
+    setIsPaletteOpen(false);
+    if (reason === 'cancel' || reason === 'selection') restoreInvokerFocus();
+  };
+
+  const openSettings = (preserveInvoker = false) => {
+    if (!preserveInvoker) rememberFocusInvoker();
+    setIsSettingsOpen(true);
+  };
+
+  const closeSettings = (reason: SettingsCloseReason) => {
+    setIsSettingsOpen(false);
+    if (reason === 'cancel') restoreInvokerFocus();
+  };
+
+  const focusSearchInput = () => {
+    const token = editorFocusTokenRef.current + 1;
+    editorFocusTokenRef.current = token;
+    pendingEditorFocusRef.current = null;
+    const interactionEpoch = userInteractionEpochRef.current;
+    // SearchPanel focuses on mount; this covers an already-mounted panel whose
+    // input lost focus to the command palette.
+    requestAnimationFrame(() => {
+      if (editorFocusTokenRef.current !== token || userInteractionEpochRef.current !== interactionEpoch) return;
+      const input = document.querySelector<HTMLInputElement>('.search-input');
+      if (!input) return;
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active.closest('.settings-overlay')) return;
+      input.focus();
+    });
+  };
+
+  const showExplorerSidebar = () => {
+    isSidebarOpenRef.current = true;
+    sidebarTabRef.current = 'explorer';
+    setIsSidebarOpen(true);
+    setSidebarTab('explorer');
+  };
+
+  const showSearchSidebar = () => {
+    isSidebarOpenRef.current = true;
+    sidebarTabRef.current = 'search';
+    setIsSidebarOpen(true);
+    setSidebarTab('search');
+    // A plain Search open must not replay a previous Space `s w` query.
+    setSearchRequest(null);
+    focusSearchInput();
+  };
+
+  // Ctrl+Shift+E mirrors the activity bar: reveal Explorer, select it when a
+  // different sidebar tab is showing, or close the sidebar when it already is.
+  const toggleExplorerSidebar = () => {
+    if (!isSidebarOpenRef.current) {
+      showExplorerSidebar();
+      return;
+    }
+    if (sidebarTabRef.current === 'explorer') {
+      isSidebarOpenRef.current = false;
+      setIsSidebarOpen(false);
+      focusActiveEditorFromSidebar();
+      return;
+    }
+    showExplorerSidebar();
+  };
+
+  // Ctrl+Shift+F toggles Search. Selecting Search always focuses its query;
+  // closing it returns to the editor without relying on focus already sitting
+  // in the editor (Search may remain the active tab after Escape).
+  const toggleSearchSidebar = () => {
+    if (!isSidebarOpenRef.current) {
+      showSearchSidebar();
+      return;
+    }
+    if (sidebarTabRef.current === 'search') {
+      isSidebarOpenRef.current = false;
+      setIsSidebarOpen(false);
+      focusActiveEditorFromSidebar();
+      return;
+    }
+    showSearchSidebar();
+  };
+
+  // Ctrl+B hides or shows the sidebar without changing the active tab. When it
+  // closes the sidebar from Search, return focus to the editor instead of
+  // leaving focus on a detached input.
+  const toggleSidebarVisibility = () => {
+    if (isSidebarOpenRef.current) {
+      isSidebarOpenRef.current = false;
+      setIsSidebarOpen(false);
+      focusActiveEditorFromSidebar();
+      return;
+    }
+    isSidebarOpenRef.current = true;
+    setIsSidebarOpen(true);
+  };
+
+  const dismissQuickOpen = (reason: QuickOpenDismissReason) => {
+    if (reason === 'cancel') restoreInvokerFocus();
+  };
+
+  // Space leader commands reuse the same state transitions as the command
+  // palette and Ctrl shortcuts instead of introducing separate actions. Local
+  // actions receive the pane/tab that was focused when the sequence completed.
+  const runVimLeaderAction = (action: VimLeaderAction, target: VimEditorTarget) => {
+    switch (action) {
+      case 'command-palette':
+        openPalette();
+        break;
+      case 'toggle-file-tree':
+        setIsSidebarOpen(value => !value);
+        break;
+      case 'search':
+        showSearchSidebar();
+        break;
+      case 'quick-open':
+        openQuickOpen();
+        break;
+      case 'save-file':
+        void handleSaveFile(target.tabId);
+        break;
+      case 'save-all':
+        void handleSaveAll();
+        break;
+      case 'close-tab':
+        if (guardPendingCloseDialog()) break;
+        requestCloseTab(target.tabId, target.paneId);
+        break;
+      case 'force-close-tab':
+        if (guardPendingCloseDialog()) break;
+        forceCloseTabOccurrence(target);
+        break;
+      case 'search-word':
+        searchForCursorWord(target);
+        break;
+      case 'clear-search-highlight':
+        editorRefs.current.get(target.paneId)?.clearSearchHighlight();
+        break;
+      case 'toggle-word-wrap':
+        setWordWrap(value => !value);
+        break;
+      case 'toggle-line-numbers':
+        setEditorPreferences(current => ({ ...current, lineNumbers: !current.lineNumbers }));
+        break;
+    }
+  };
+
+  const openInSplit = (tabId: string, kind: EditorPane['kind'] = 'editor'): string => {
+    if (tabsRef.current.length === 0) return '';
     const pane: EditorPane = { id: crypto.randomUUID(), tabId, tabIds: kind === 'editor' ? [tabId] : [], kind };
     updatePanes(current => {
       const index = current.findIndex(item => item.id === activePaneIdRef.current);
@@ -261,6 +690,7 @@ export default function App() {
       return next;
     });
     selectPane(pane.id);
+    return pane.id;
   };
 
   const closePane = (paneId: string) => {
@@ -309,6 +739,26 @@ export default function App() {
     if (editorPane) activatePaneTab(editorPane.id, id);
   };
 
+  // Vim Ctrl-o/Ctrl-i navigation resolves against the current committed refs,
+  // prefers the invoking editor pane, and only activates an already-open tab.
+  // The session owns cursor/scroll/focus once the target EditorView is ready.
+  useEffect(() => {
+    vimSession.setJumpNavigator(target => {
+      if (!tabsRef.current.some(tab => tab.id === target.documentId)) return null;
+      const invokingPaneId = focusedEditorPaneId();
+      const pane = panesRef.current.find(item =>
+        item.id === invokingPaneId && item.kind === 'editor',
+      ) ?? panesRef.current.find(item =>
+        item.kind === 'editor' && (item.tabId === target.documentId || item.tabIds.includes(target.documentId)),
+      ) ?? panesRef.current.find(item => item.kind === 'editor');
+      if (!pane) return null;
+      if (pane.tabId !== target.documentId) activatePaneTab(pane.id, target.documentId);
+      else if (activePaneIdRef.current !== pane.id) selectPane(pane.id);
+      return { paneId: pane.id };
+    });
+    return () => vimSession.setJumpNavigator(null);
+  }, [vimSession]);
+
   const theme = getTheme(previewThemeId ?? themeId);
   const codeFont = codeFontOverride ?? theme.codeFont;
 
@@ -346,9 +796,6 @@ export default function App() {
   const handleFolderOpened = (path: string) => {
     setExplorerRootPath(path);
     addRecentProject(path);
-    setOpenTerminalRequest(previous => ({ path, sequence: (previous?.sequence ?? 0) + 1 }));
-    setIsPanelOpen(true);
-    setTerminalFocusRequest(value => value + 1);
   };
 
   const handleOpenRecentProject = async (path: string) => {
@@ -362,7 +809,7 @@ export default function App() {
     }
   };
 
-  const handleChooseFolder = async () => {
+  const handleChooseFolder = async (): Promise<boolean> => {
     try {
       const selected = await open({ directory: true, multiple: false });
       if (typeof selected === 'string') {
@@ -370,15 +817,19 @@ export default function App() {
         setIsSidebarOpen(true);
         setSidebarTab('explorer');
         addToast(`Opened workspace: ${getFileNameFromPath(selected)}`, 'info');
+        return true;
       }
+      return false;
     } catch (err) {
       addToast(`Could not open folder: ${String(err)}`, 'error');
+      return false;
     }
   };
 
-  const handleOpenFile = async (path?: string, split = false, lineNumber?: number) => {
+  const handleOpenFile = async (path?: string, split = false, lineNumber?: number): Promise<boolean> => {
     try {
       let selectedPath = typeof path === "string" ? path : null;
+      let intentEpoch = userInteractionEpochRef.current;
       if (!selectedPath) {
         const selected = await open({
           multiple: false,
@@ -386,9 +837,12 @@ export default function App() {
         });
 
         if (typeof selected !== "string") {
-          return;
+          return false;
         }
         selectedPath = selected;
+        // The native dialog's own focus changes are part of this intent; a
+        // later page interaction, not the dialog, invalidates the focus handoff.
+        intentEpoch = userInteractionEpochRef.current;
       }
 
       const existing = tabsRef.current.find(tab => tab.path === selectedPath);
@@ -398,9 +852,10 @@ export default function App() {
       if (existing) {
         targetTabId = existing.id;
         if (split) {
-          openInSplit(existing.id);
+          targetPaneId = openInSplit(existing.id);
         } else {
           activateTab(existing.id);
+          targetPaneId = activePaneIdRef.current;
         }
       } else {
         const content = await readTextFile(selectedPath);
@@ -419,24 +874,33 @@ export default function App() {
         } else {
           updateTabs(current => [...current, newTab]);
           if (split) {
-            openInSplit(newTab.id);
+            targetPaneId = openInSplit(newTab.id);
           } else {
             activateTab(newTab.id);
+            targetPaneId = activePaneIdRef.current;
           }
         }
       }
 
+      // Wait for the destination pane's EditorView rather than assuming the
+      // view exists in the same turn the file is activated. The captured
+      // interaction epoch prevents a read that finishes after the user has
+      // clicked or focused elsewhere from stealing focus.
+      requestEditorFocus({ paneId: targetPaneId, tabId: targetTabId }, intentEpoch);
       if (lineNumber != null) {
         setTimeout(() => {
+          if (intentEpoch !== userInteractionEpochRef.current) return;
           const pane = panesRef.current.find(p => p.id === targetPaneId && p.kind === 'editor') ?? panesRef.current.find(p => p.tabId === targetTabId && p.kind === 'editor');
           if (pane) {
             editorRefs.current.get(pane.id)?.jumpToLine(lineNumber);
           }
         }, 100);
       }
+      return true;
     } catch (error) {
       console.error("Failed to open file:", error);
       addToast(`Could not open file: ${String(error)}`, 'error');
+      return false;
     }
   };
 
@@ -501,12 +965,84 @@ export default function App() {
     setActiveTabId(activeTabIdRef.current);
   };
 
+  const guardPendingCloseDialog = (): boolean => {
+    if (pendingCloseOperationRef.current === null && !isCloseAllConfirmationOpenRef.current) return false;
+    addToast('Finish the current close operation first.', 'warning');
+    return true;
+  };
+
+  const forceCloseTabOccurrence = (target: VimEditorTarget) => {
+    const pane = panesRef.current.find(item => item.id === target.paneId && item.kind === 'editor');
+    if (!pane || !pane.tabIds.includes(target.tabId)) return;
+    applyTabClosures([{ tabId: target.tabId, paneId: target.paneId }]);
+  };
+
+  const searchForCursorWord = (target: VimEditorTarget) => {
+    const word = editorRefs.current.get(target.paneId)?.getCursorWord();
+    // `Space s w` always reveals Search; without a word it only focuses the
+    // panel, leaving any existing query and results untouched.
+    showSearchSidebar();
+    if (!word) return;
+    searchRequestIdRef.current += 1;
+    setSearchRequest({ term: word, id: searchRequestIdRef.current });
+  };
+
+  /**
+   * Ex `:q` closes only the pane occurrence that invoked it. A dirty occurrence
+   * is refused with a notification; Vim's own prompt is the only confirmation.
+   */
+  const handleExQuit = (target: VimEditorTarget, force: boolean) => {
+    if (guardPendingCloseDialog()) return;
+    const pane = panesRef.current.find(item => item.id === target.paneId && item.kind === 'editor');
+    const tab = tabsRef.current.find(item => item.id === target.tabId);
+    if (!pane || !tab || !pane.tabIds.includes(target.tabId)) return;
+    if (!force && tab.content !== tab.savedContent) {
+      addToast(`${getFileNameFromPath(tab.path)} has unsaved changes.`, 'warning');
+      return;
+    }
+    applyTabClosures([{ tabId: target.tabId, paneId: target.paneId }]);
+  };
+
+  /**
+   * Ex `:wq` reuses the existing save flow and closes only after it succeeds.
+   * The captured target is revalidated after the await, and the tab must still
+   * be clean: an edit made while the write was pending keeps it open.
+   */
+  const handleExWriteQuit = async (target: VimEditorTarget) => {
+    if (guardPendingCloseDialog()) return;
+    const pane = panesRef.current.find(item => item.id === target.paneId && item.kind === 'editor');
+    const tab = tabsRef.current.find(item => item.id === target.tabId);
+    if (!pane || !tab || !pane.tabIds.includes(target.tabId)) return;
+
+    if (!(await handleSaveFile(target.tabId))) return;
+
+    const savedTab = tabsRef.current.find(item => item.id === target.tabId);
+    if (!savedTab || savedTab.content !== savedTab.savedContent) return;
+    if (guardPendingCloseDialog()) return;
+    const savedPane = panesRef.current.find(item => item.id === target.paneId && item.kind === 'editor');
+    if (!savedPane || !savedPane.tabIds.includes(target.tabId)) return;
+    applyTabClosures([{ tabId: target.tabId, paneId: target.paneId }]);
+  };
+
+  const handleSaveAll = async () => {
+    // Snapshot the dirty set up front: saves may change paths/savedContent, but
+    // the sequence must not chase tabs that were already clean at invocation.
+    const dirtyTabIds = tabsRef.current
+      .filter(tab => tab.content !== tab.savedContent)
+      .map(tab => tab.id);
+    for (const tabId of dirtyTabIds) {
+      if (!(await handleSaveFile(tabId))) return;
+    }
+  };
+
   const addUntitledTab = () => {
     const tab = newUntitledTab();
+    let targetPaneId = '';
     if (tabsRef.current.length === 0 || panesRef.current.length === 0) {
       const newPane: EditorPane = { id: crypto.randomUUID(), tabId: tab.id, tabIds: [tab.id], kind: 'editor' };
       updateTabs(() => [tab]);
       updatePanes(() => [newPane]);
+      targetPaneId = newPane.id;
       activeTabIdRef.current = tab.id;
       setActiveTabId(tab.id);
       activePaneIdRef.current = newPane.id;
@@ -514,8 +1050,9 @@ export default function App() {
     } else {
       updateTabs(current => [...current, tab]);
       activateTab(tab.id);
+      targetPaneId = activePaneIdRef.current;
     }
-    setTimeout(focusActiveEditor, 50);
+    requestEditorFocus({ paneId: targetPaneId, tabId: tab.id });
   };
 
   const requestCloseTabs = (tabIdsToClose: string[], paneId: string) => {
@@ -616,8 +1153,76 @@ export default function App() {
     removeUnavailablePreviews();
   };
 
+  // A deferred restoration must never outlive a newer user focus decision.
+  // Capture pointer presses and focus moves while a request is pending; only
+  // focus that lands inside the requested editor is ignored.
+  useEffect(() => {
+    const cancelOnInteraction = () => {
+      userInteractionEpochRef.current += 1;
+      if (pendingEditorFocusRef.current) cancelPendingEditorFocus();
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      if (programmaticEditorFocusRef.current) return;
+      userInteractionEpochRef.current += 1;
+      const pending = pendingEditorFocusRef.current;
+      if (!pending) return;
+      const pane = editorPaneForTarget(pending.target);
+      const element = pane ? paneElement(pane.id) : null;
+      if (element && event.target instanceof Node && element.contains(event.target)) return;
+      cancelPendingEditorFocus();
+    };
+    window.addEventListener('pointerdown', cancelOnInteraction, true);
+    window.addEventListener('focusin', onFocusIn, true);
+    return () => {
+      window.removeEventListener('pointerdown', cancelOnInteraction, true);
+      window.removeEventListener('focusin', onFocusIn, true);
+    };
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const focusedElement = document.activeElement;
+      const focusedPane = focusedElement instanceof Element
+        ? focusedElement.closest<HTMLElement>('[data-pane-id]')
+        : null;
+      const vimState = editorRefs.current
+        .get(focusedPane?.dataset.paneId ?? activePaneIdRef.current)
+        ?.getVimState() ?? null;
+      const focusedSurface = focusedSurfaceFor(focusedElement, {
+        paletteOpen: isPaletteOpen,
+        dialogOpen: isSettingsOpen || currentPendingCloseId != null || isCloseAllConfirmationOpen,
+      });
+
+      // Ctrl-H/J/K/L are reserved in editors: the Editor's high-precedence
+      // keymap consumes them before CodeMirror defaults or the Vim engine.
+      // App must not turn them into Crumb shortcuts. Terminal and native input
+      // focus falls through unchanged and keeps its own key handling.
+      if (focusedSurface === 'editor' && isEditorReservedCtrlKey(e)) return;
+
+      const vimOwnsShortcut = shouldVimOwnShortcut({
+        enabled: editorPreferences.vimModeEnabled,
+        focusedSurface,
+        mode: vimState?.mode ?? 'inactive',
+        key: e.key,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        altKey: e.altKey,
+        shiftKey: e.shiftKey,
+        // App does not install source-level mappings of its own in this task.
+        mappingOwnsKey: false,
+        isMac: isMacPlatform,
+      });
+      // Do not preventDefault/stopPropagation here: returning lets the event
+      // continue to the focused CodeMirror Vim adapter, which owns the key.
+      if (vimOwnsShortcut) return;
+
+      // A terminal or ordinary text input (Vim prompts, Search files, and
+      // sidebar inputs included) owns these Ctrl bindings. Returning without
+      // preventDefault/stopPropagation lets xterm's PTY or the input handle the
+      // key; Ctrl-S and other global shortcuts still fall through to App below.
+      if ((focusedSurface === 'terminal' || focusedSurface === 'input')
+        && isInputOwnedVimCtrlKey(e)) return;
+
       const scaling = scaleShortcut(e);
       if (scaling) {
         e.preventDefault();
@@ -640,30 +1245,69 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "p") {
         e.preventDefault();
         e.stopPropagation();
-        setIsPaletteOpen(open => !open);
-        return;
-      }
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "f") {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsSidebarOpen(true);
-        setSidebarTab('search');
+        if (!isPaletteOpen) openPalette();
+        else if (paletteMode !== 'commands') {
+          setPaletteInitialMode('commands');
+          setPaletteMode('commands');
+        }
         return;
       }
       if ((e.metaKey || e.ctrlKey) && e.key === ',') {
         e.preventDefault();
         e.stopPropagation();
-        setIsSettingsOpen(open => !open);
+        if (isSettingsOpen) {
+          setIsSettingsOpen(false);
+          restoreInvokerFocus();
+        } else {
+          openSettings();
+        }
         return;
       }
-      if (isPaletteOpen || isSettingsOpen) return;
+      if (isSettingsOpen) return;
 
+      // Sidebar chords are Ctrl-only on every platform. They stay available to
+      // focused Vim editors (Normal or Insert) and the Search query; other
+      // typing inputs and terminals keep their own key handling. Neither chord
+      // is a Vim-owned Ctrl binding, so App receives it before the editor does.
+      const isSearchInput = focusedElement instanceof Element && focusedElement.closest('.search-input') != null;
+      const sidebarShortcutAllowed = !isPaletteOpen
+        && focusedSurface !== 'terminal'
+        && (focusedSurface !== 'input' || isSearchInput);
+      if (sidebarShortcutAllowed
+        && e.ctrlKey && !e.metaKey && !e.altKey && e.shiftKey) {
+        const key = e.key.toLowerCase();
+        if (key === 'e') {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleExplorerSidebar();
+          return;
+        }
+        if (key === 'f') {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleSearchSidebar();
+          return;
+        }
+      }
+
+      const isExactCtrlP = e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'p';
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
+        // While the file picker is already open, an exact Ctrl+P belongs to
+        // Quick Open as its cycle key. Let it reach the field instead of
+        // reopening the palette and resetting focus, query, or selection.
+        // Cmd+P keeps the existing open/reset behavior on macOS.
+        if (isExactCtrlP && isPaletteOpen && paletteMode === 'files') return;
         e.stopPropagation();
-        quickOpenRef.current?.focus();
+        openQuickOpen();
         return;
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        void handleSaveFile();
+        return;
+      }
+      if (isPaletteOpen) return;
       if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'w') {
         e.preventDefault();
         e.stopPropagation();
@@ -689,29 +1333,31 @@ export default function App() {
         addUntitledTab();
         return;
       }
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "j") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (isPanelOpen) focusActiveEditor();
-        setIsPanelOpen((prev) => !prev);
-        return;
-      }
-
       if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && (e.code === "Backquote" || e.key === "`")) {
         e.preventDefault();
         e.stopPropagation();
-        if (document.activeElement?.closest(".xterm")) {
+        if (isPanelOpen) {
           focusActiveEditor();
+          setIsPanelOpen(false);
         } else {
           setIsPanelOpen(true);
+          // Select the Terminal tab and focus its input, not merely the panel.
           setTerminalFocusRequest(value => value + 1);
         }
         return;
       }
 
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
+      // Ctrl+B is an exact unshifted Ctrl chord that toggles whichever sidebar
+      // tab is active. It supersedes Vim's Ctrl-B page-back in editors and stays
+      // available from the Search query, but terminals, ordinary inputs, and
+      // Ctrl+Shift+B keep their own behavior. Cmd+B keeps the existing toggle.
+      const key = e.key.toLowerCase();
+      const isCtrlB = e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && key === 'b';
+      const isCmdB = e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && key === 'b';
+      if ((isCtrlB || isCmdB) && (isCmdB || sidebarShortcutAllowed)) {
         e.preventDefault();
-        setIsSidebarOpen((prev) => !prev);
+        e.stopPropagation();
+        toggleSidebarVisibility();
         return;
       }
 
@@ -721,47 +1367,61 @@ export default function App() {
         return;
       }
 
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
-        e.preventDefault();
-        void handleSaveFile();
-      }
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [isPaletteOpen, isSettingsOpen, isPanelOpen, currentPendingCloseId, isCloseAllConfirmationOpen]);
+  }, [editorPreferences.vimModeEnabled, isPaletteOpen, paletteMode, isSettingsOpen, isPanelOpen, currentPendingCloseId, isCloseAllConfirmationOpen]);
 
   const commands: PaletteCommand[] = [
-    { id: 'settings', label: 'Preferences: Open Settings', shortcut: 'Ctrl/Cmd ,', run: () => setIsSettingsOpen(true) },
-    { id: 'theme', label: 'Preferences: Color Theme', detail: `Current: ${theme.name}`, run: () => {} },
-    { id: 'code-font', label: 'Preferences: Editor Font', detail: `Current: ${codeFont}`, run: () => {} },
-    { id: 'search-files', label: 'View: Find in Files (Search)', shortcut: 'Ctrl/Cmd Shift F', run: () => { setIsSidebarOpen(true); setSidebarTab('search'); } },
-    { id: 'terminal', label: isPanelOpen ? 'View: Hide Terminal' : 'View: Show Terminal', shortcut: 'Ctrl/Cmd J', run: () => setIsPanelOpen(value => !value) },
-    { id: 'explorer', label: isSidebarOpen ? 'View: Hide File Tree' : 'View: Show File Tree', shortcut: 'Ctrl/Cmd B', run: () => setIsSidebarOpen(value => !value) },
-    { id: 'word-wrap', label: wordWrap ? 'Editor: Disable Word Wrap' : 'Editor: Enable Word Wrap', detail: wordWrap ? 'Wrapping is on' : 'Wrapping is off', run: () => setWordWrap(value => !value) },
-    ...(activeTab ? [{ id: 'split-editor', label: 'Editor: Open Active File in Split View', run: () => openInSplit(activeTab.id) }] : []),
-    ...(canPreviewMarkdown ? [{ id: 'markdown-preview', label: isPreviewOpen ? 'Markdown: Hide Preview' : 'Markdown: Open Preview to Side', run: toggleMarkdownPreview }] : []),
-    { id: 'font-up', label: 'Appearance: Increase Font Size', detail: `Currently ${fontSize}px`, run: () => setFontSize(value => Math.min(24, value + 1)) },
-    { id: 'font-down', label: 'Appearance: Decrease Font Size', detail: `Currently ${fontSize}px`, run: () => setFontSize(value => Math.max(10, value - 1)) },
-    { id: 'font-reset', label: 'Appearance: Reset Font Size', detail: '13px', run: () => setFontSize(13) },
-    { id: 'open', label: 'File: Open File', shortcut: 'Ctrl/Cmd O', run: () => void handleOpenFile() },
-    { id: 'open-folder', label: 'File: Open Folder / Project', run: () => void handleChooseFolder() },
-    { id: 'quick-open', label: 'File: Search Files', shortcut: 'Ctrl/Cmd P', run: () => quickOpenRef.current?.focus() },
-    { id: 'new', label: 'File: New File', shortcut: 'Ctrl/Cmd N', run: addUntitledTab },
-    ...(activeTab ? [{ id: 'save', label: 'File: Save File', shortcut: 'Ctrl/Cmd S', run: () => void handleSaveFile() }] : []),
-    { id: 'terminal-folder', label: 'File: Open Current Terminal Folder', run: () => void handleOpenTerminalFolder() },
+    { id: 'settings', label: 'Preferences: Open Settings', shortcut: shortcutLabel(','), run: () => openSettings(true) },
+    { id: 'theme', label: 'Preferences: Color Theme', detail: theme.name, run: () => {} },
+    { id: 'code-font', label: 'Preferences: Editor Font', detail: `${codeFont} · ${fontSize}px`, run: () => {} },
+    { id: 'search-files', label: 'View: Find in Files (Search)', shortcut: 'Ctrl+Shift+F', run: () => { setIsSidebarOpen(true); setSidebarTab('search'); focusSearchInput(); } },
+    { id: 'terminal', label: isPanelOpen ? 'View: Hide Terminal' : 'View: Show Terminal', shortcut: 'Ctrl+`', run: () => { setIsPanelOpen(value => !value); restoreInvokerFocus(); } },
+    { id: 'explorer', label: isSidebarOpen ? 'View: Hide File Tree' : 'View: Show File Tree', shortcut: shortcutLabel('B'), run: () => { setIsSidebarOpen(value => !value); restoreInvokerFocus(); } },
+    { id: 'word-wrap', label: wordWrap ? 'Editor: Disable Word Wrap' : 'Editor: Enable Word Wrap', detail: wordWrap ? 'Wrapping is on' : 'Wrapping is off', run: () => { setWordWrap(value => !value); restoreInvokerFocus(); } },
+    { id: 'vim-mode', label: editorPreferences.vimModeEnabled ? 'Editor: Disable Vim Mode' : 'Editor: Enable Vim Mode', detail: editorPreferences.vimModeEnabled ? 'Vim mode is on' : 'Vim mode is off', run: () => { setEditorPreferences(current => ({ ...current, vimModeEnabled: !current.vimModeEnabled })); restoreInvokerFocus(); } },
+    ...(activeTab ? [{ id: 'split-editor', label: 'Editor: Open Active File in Split View', run: () => { const paneId = openInSplit(activeTab.id); requestEditorFocus({ paneId, tabId: activeTab.id }); } }] : []),
+    ...(canPreviewMarkdown ? [{ id: 'markdown-preview', label: isPreviewOpen ? 'Markdown: Hide Preview' : 'Markdown: Open Preview to Side', run: () => { toggleMarkdownPreview(); restoreInvokerFocus(); } }] : []),
+    { id: 'font-up', label: 'Appearance: Increase Font Size', detail: `Currently ${fontSize}px`, shortcut: shortcutLabel('Shift+='), run: () => { setFontSize(value => Math.min(24, value + 1)); restoreInvokerFocus(); } },
+    { id: 'font-down', label: 'Appearance: Decrease Font Size', detail: `Currently ${fontSize}px`, shortcut: shortcutLabel('Shift+−'), run: () => { setFontSize(value => Math.max(10, value - 1)); restoreInvokerFocus(); } },
+    { id: 'font-reset', label: 'Appearance: Reset Font Size', detail: '13px', shortcut: shortcutLabel('Shift+0'), run: () => { setFontSize(13); restoreInvokerFocus(); } },
+    { id: 'open', label: 'File: Open File', shortcut: shortcutLabel('O'), run: () => { void handleOpenFile().then(opened => { if (!opened) restoreInvokerFocus(); }); } },
+    { id: 'open-folder', label: 'File: Open Folder / Project', run: () => { void handleChooseFolder().then(opened => { if (!opened) restoreInvokerFocus(); }); } },
+    { id: 'quick-open', label: 'File: Search Files', shortcut: shortcutLabel('P'), run: () => {} },
+    { id: 'new', label: 'File: New File', shortcut: shortcutLabel('N'), run: addUntitledTab },
+    ...(tabs.length > 0 ? [{ id: 'close-all', label: 'File: Close All Tabs', run: closeAllTabsAndPanes }] : []),
+    ...(activeTab ? [{ id: 'save', label: 'File: Save File', shortcut: shortcutLabel('S'), run: () => { void handleSaveFile().then(() => restoreInvokerFocus()); } }] : []),
+    { id: 'terminal-folder', label: 'File: Open Current Terminal Folder', run: () => { void handleOpenTerminalFolder(); restoreInvokerFocus(); } },
   ];
 
   return (
     <div className="app-shell" style={{ ...themeVariables(theme, codeFont), colorScheme: theme.dark ? 'dark' : 'light', height: "100vh", width: "100vw", display: "flex", flexDirection: "column", overflow: "hidden", backgroundColor: "var(--editor)", color: "var(--text)" }}>
-      <header className="top-bar">
-        <div className="top-bar-brand"><FolderIcon width={17} height={17} /><strong>crumb</strong></div>
-        <QuickOpen ref={quickOpenRef} rootPath={explorerRootPath} openPaths={tabs.flatMap(tab => tab.path ? [tab.path] : [])} onOpenFile={path => { void handleOpenFile(path); }} />
+      <header className="top-bar" data-tauri-drag-region>
+        <div className="top-bar-brand" title={explorerRootPath ? `Crumb — ${explorerRootPath}` : 'Crumb'}>
+          <strong>{explorerRootPath ? getFileNameFromPath(explorerRootPath) : 'Crumb'}</strong>
+        </div>
+        <div className={`command-center ${isPaletteOpen ? 'open' : ''}`}>
+          <button ref={commandTriggerRef} className="command-trigger" title={`Open command palette (${shortcutLabel('Shift+P')})`} onClick={openPalette} tabIndex={isPaletteOpen ? -1 : 0} aria-hidden={isPaletteOpen || undefined}>
+            <KeyboardIcon /><span>Commands</span><kbd>{shortcutLabel('Shift+P')}</kbd>
+          </button>
+          {isPaletteOpen && <CommandPalette
+            triggerRef={commandTriggerRef}
+            commands={commands}
+            themes={themes}
+            currentThemeId={themeId}
+            codeFontOverride={codeFontOverride}
+            onCodeFontChange={setCodeFontOverride}
+            onThemeChange={setThemeId}
+            onClose={closePalette}
+            onRunCommand={command => command.run()}
+            initialMode={paletteInitialMode}
+            onModeChange={setPaletteMode}
+            renderFileSearch={onBack => <QuickOpen ref={quickOpenRef} rootPath={explorerRootPath} openPaths={tabs.flatMap(tab => tab.path ? [tab.path] : [])} onOpenFile={path => { closePalette('command'); void handleOpenFile(path); }} onActivate={rememberFocusInvoker} onDismiss={dismissQuickOpen} embedded onBack={onBack} />}
+          />}
+        </div>
         <div className="top-bar-actions">
-          <span className="top-bar-workspace" title={explorerRootPath ?? 'No folder open'}>{explorerRootPath ? getFileNameFromPath(explorerRootPath) : 'No folder'}</span>
-          <span className="top-bar-language" title="Current file language">{activeTab ? languageName(activeTab.path) : ''}</span>
           {canPreviewMarkdown && <button className={`markdown-preview-toggle ${isPreviewOpen ? 'active' : ''}`} aria-pressed={isPreviewOpen} title={isPreviewOpen ? 'Hide Markdown preview' : 'Open Markdown preview to the side'} onClick={toggleMarkdownPreview}><SplitPreviewIcon /><span>Preview</span></button>}
-          {tabs.length > 0 && <button title="Close all editor tabs" onClick={closeAllTabsAndPanes}>Close All</button>}
-          <button title="Commands and themes (Ctrl/Cmd+Shift+P)" onClick={() => setIsPaletteOpen(true)}>Commands</button>
         </div>
       </header>
 
@@ -780,7 +1440,7 @@ export default function App() {
                 setSidebarTab('explorer');
               }
             }}
-            title="Explorer (⌘B)"
+            title={`Explorer (Ctrl+Shift+E)`}
             aria-label="Toggle file explorer"
             className={`activity-btn ${isSidebarOpen && sidebarTab === 'explorer' ? 'active' : ''}`}
           >
@@ -799,7 +1459,7 @@ export default function App() {
                 setSidebarTab('search');
               }
             }}
-            title="Search in Files (⌘Shift+F)"
+            title={`Search in files (Ctrl+Shift+F)`}
             aria-label="Toggle search in files"
             className={`activity-btn ${isSidebarOpen && sidebarTab === 'search' ? 'active' : ''}`}
           >
@@ -810,28 +1470,20 @@ export default function App() {
 
           {/* Settings Button */}
           <button
-            onClick={() => setIsSettingsOpen(true)}
-            title="Editor Settings (⌘,)"
+            onClick={() => openSettings()}
+            title={`Editor settings (${shortcutLabel(',')})`}
             aria-label="Open settings"
             className="activity-btn activity-btn-settings"
           >
             <SettingsIcon width={19} height={19} />
           </button>
 
-          {/* Command Palette Trigger */}
-          <button
-            onClick={() => setIsPaletteOpen(true)}
-            title="Commands and themes (Ctrl/Cmd+Shift+P)"
-            aria-label="Open command palette"
-            className="activity-btn activity-btn-palette"
-          >
-            ›
-          </button>
         </div>
 
         {/* Sidebar Container */}
         <div
           ref={sidebarContainerRef}
+          hidden={!isSidebarOpen}
           style={{
             width: isSidebarOpen ? `${sidebarWidth}px` : "0px",
             minWidth: isSidebarOpen ? `${sidebarWidth}px` : "0px",
@@ -856,7 +1508,10 @@ export default function App() {
           ) : (
             <SearchPanel
               rootPath={explorerRootPath}
+              request={searchRequest}
+              onRequestConsumed={() => setSearchRequest(null)}
               onOpenFile={(path, line) => { void handleOpenFile(path, false, line); }}
+              onExitToEditor={focusActiveEditorFromSidebar}
               onClose={() => setIsSidebarOpen(false)}
             />
           )}
@@ -870,11 +1525,18 @@ export default function App() {
             aria-label="Resize file tree"
             aria-orientation="vertical"
             aria-valuemin={160}
-            aria-valuemax={Math.max(160, window.innerWidth - 268)}
+            aria-valuemax={Math.max(160, window.innerWidth - 280)}
             aria-valuenow={sidebarWidth}
+            title="Drag to resize Explorer; double-click or press Home to reset"
+            onDoubleClick={() => {
+              const width = clampSidebarWidth(defaultSidebarWidth, window.innerWidth);
+              currentDragWidthRef.current = width;
+              setSidebarWidth(width);
+            }}
             tabIndex={0}
             onPointerDown={event => {
               event.preventDefault();
+              currentDragWidthRef.current = sidebarWidth;
               sidebarDraggingRef.current = true;
               event.currentTarget.setPointerCapture(event.pointerId);
             }}
@@ -912,7 +1574,10 @@ export default function App() {
             onKeyDown={event => {
               if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
                 event.preventDefault();
-                setSidebarWidth(width => Math.max(160, Math.min(window.innerWidth - 268, width + (event.key === 'ArrowRight' ? 10 : -10))));
+                setSidebarWidth(width => clampSidebarWidth(width + (event.key === 'ArrowRight' ? 10 : -10), window.innerWidth));
+              } else if (event.key === 'Home') {
+                event.preventDefault();
+                setSidebarWidth(clampSidebarWidth(defaultSidebarWidth, window.innerWidth));
               }
             }}
           />
@@ -925,9 +1590,9 @@ export default function App() {
               onNewFile={addUntitledTab}
               onOpenFile={handleOpenFile}
               onOpenFolder={handleChooseFolder}
-              onOpenSearch={() => { setIsSidebarOpen(true); setSidebarTab('search'); }}
-              onOpenPalette={() => setIsPaletteOpen(true)}
-              onOpenSettings={() => setIsSettingsOpen(true)}
+              onOpenSearch={() => { setIsSidebarOpen(true); setSidebarTab('search'); focusSearchInput(); }}
+              onOpenPalette={openPalette}
+              onOpenSettings={() => openSettings()}
               onToggleTerminal={() => setIsPanelOpen(v => !v)}
               recentProjects={recentProjects}
               onOpenProject={path => { void handleOpenRecentProject(path); }}
@@ -981,6 +1646,7 @@ export default function App() {
                           content={file.content}
                           path={file.path}
                           tabId={file.id}
+                          fontSize={fontSize}
                           onOpenFile={path => { void handleOpenFile(path); }}
                           onClose={() => closePane(pane.id)}
                           onActivate={() => selectPane(pane.id)}
@@ -998,11 +1664,19 @@ export default function App() {
                             </div>;
                           })}
                         </div>
-                        {panes.length > 1 && canClose && <button className="editor-pane-close" aria-label={`Close split for ${getFileNameFromPath(file.path)}`} title="Close split" onClick={() => closePane(pane.id)}>×</button>}
+                        <div className="editor-pane-actions">
+                          <button className="editor-tab-menu" aria-label="Tab actions" title="Tab actions" aria-expanded={tabMenu?.paneId === pane.id} aria-controls={tabMenu?.paneId === pane.id ? 'editor-tab-actions' : undefined} onClick={event => {
+                            const rect = event.currentTarget.getBoundingClientRect();
+                            setTabMenu({ x: Math.max(8, rect.right - 190), y: rect.bottom + 4, tabId: file.id, paneId: pane.id });
+                          }}>⋯</button>
+                          {panes.length > 1 && canClose && <button className="editor-pane-close" aria-label={`Close split for ${getFileNameFromPath(file.path)}`} title="Close split" onClick={() => closePane(pane.id)}>×</button>}
+                        </div>
                       </div>
                       <div className="editor-pane-content">
                         <Editor
                           ref={handle => { if (handle) editorRefs.current.set(pane.id, handle); else editorRefs.current.delete(pane.id); }}
+                          paneId={pane.id}
+                          vimSession={vimSession}
                           tabId={file.id}
                           path={file.path}
                           openTabIds={tabs.map(tab => tab.id)}
@@ -1013,8 +1687,17 @@ export default function App() {
                           wordWrap={wordWrap}
                           preferences={editorPreferences}
                           onCursorChange={cursor => reportCursor(pane.id, cursor)}
+                          onVimStateChange={reportVimState}
+                          onFlashStateChange={reportFlashState}
                           onChange={value => handleEditorChange(file.id, value)}
-                          onFocus={() => selectPane(pane.id)}
+                          onSaveRequest={tabId => { void handleSaveFile(tabId); }}
+                          onVimLeaderAction={runVimLeaderAction}
+                          onExQuitRequest={handleExQuit}
+                          onExWriteQuitRequest={target => { void handleExWriteQuit(target); }}
+                          onFocus={() => {
+                            lastFocusedEditorPaneRef.current = pane.id;
+                            selectPane(pane.id);
+                          }}
                         />
                       </div>
                     </>}
@@ -1091,23 +1774,10 @@ export default function App() {
           display: isPanelOpen ? "block" : "none"
         }}
       >
-        <BottomPanel isOpen={isPanelOpen} clearPromptOnStart={clearPromptOnStart} onClose={() => setIsPanelOpen(false)} onActiveSessionChange={setActiveTerminalSessionId} theme={theme} fontSize={fontSize} fontFamily={codeFont} focusRequest={terminalFocusRequest} workingDirectory={explorerRootPath} openTerminalRequest={openTerminalRequest} />
+        <BottomPanel isOpen={isPanelOpen} clearPromptOnStart={clearPromptOnStart} onClose={() => setIsPanelOpen(false)} onActiveSessionChange={setActiveTerminalSessionId} theme={theme} fontSize={fontSize} fontFamily={codeFont} focusRequest={terminalFocusRequest} workingDirectory={explorerRootPath} />
       </div>
 
-      {/* Command Palette */}
-      <StatusBar cursor={activeCursor} preferences={editorPreferences} lineEnding={activeLineEnding} language={activeTab ? languageName(activeTab.path) : 'No file'} wordWrap={wordWrap} zoom={zoomLevel} theme={theme.name} />
-      {isPaletteOpen && (
-        <CommandPalette
-          commands={commands}
-          themes={themes}
-          currentThemeId={themeId}
-          codeFontOverride={codeFontOverride}
-          onCodeFontChange={setCodeFontOverride}
-          onThemeChange={setThemeId}
-          onClose={() => setIsPaletteOpen(false)}
-        />
-      )}
-
+      <StatusBar hasDocument={activeTab != null} cursor={activeCursor} vimStatus={vimStatus} flashStatus={flashStatus} preferences={editorPreferences} lineEnding={activeLineEnding} language={activeTab ? languageName(activeTab.path) : 'No file'} wordWrap={wordWrap} zoom={zoomLevel} theme={theme.name} />
       {/* Settings Modal */}
       {isSettingsOpen && (
           <SettingsModal
@@ -1126,17 +1796,20 @@ export default function App() {
           onFontSizeChange={setFontSize}
           wordWrap={wordWrap}
           onWordWrapChange={setWordWrap}
-          onClose={() => setIsSettingsOpen(false)}
+          onClose={closeSettings}
         />
       )}
 
       {/* Tab Context Menu */}
       {tabMenu && <div className="tab-menu-backdrop" onMouseDown={() => setTabMenu(null)} onContextMenu={event => { event.preventDefault(); setTabMenu(null); }}>
-        <div className="tree-menu" style={{ left: tabMenu.x, top: tabMenu.y }} onMouseDown={event => event.stopPropagation()}>
+        <div ref={tabMenuRef} id="editor-tab-actions" className="tree-menu" style={{ left: tabMenu.x, top: tabMenu.y }} onMouseDown={event => event.stopPropagation()} onKeyDown={event => {
+          if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setTabMenu(null); }
+        }}>
           <button onClick={() => { requestCloseTab(tabMenu.tabId, tabMenu.paneId); setTabMenu(null); }}>Close Tab</button>
           <button onClick={() => { closeOtherTabs(tabMenu.tabId, tabMenu.paneId); setTabMenu(null); }}>Close Others</button>
           <button onClick={() => { closeTabsToTheRight(tabMenu.tabId, tabMenu.paneId); setTabMenu(null); }}>Close to the Right</button>
           <button onClick={() => { closeSavedTabs(tabMenu.paneId); setTabMenu(null); }}>Close Saved</button>
+          <button onClick={() => { setTabMenu(null); closeAllTabsAndPanes(); }}>Close All Tabs</button>
           <div style={{ height: '1px', background: 'var(--border)', margin: '4px 0' }} />
           <button onClick={() => { selectPane(tabMenu.paneId); openInSplit(tabMenu.tabId); setTabMenu(null); }}>Open in Split View</button>
         </div>

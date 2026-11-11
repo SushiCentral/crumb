@@ -10,7 +10,8 @@ function terminalTheme(theme: Theme) {
   const { colors, syntax } = theme;
   return {
     background: colors.terminal, foreground: colors.text, cursor: colors.accent,
-    selectionBackground: colors.selection,
+    cursorAccent: colors.terminal,
+    selectionBackground: colors.selection, selectionForeground: colors.text,
     black: colors.activity, red: syntax.property, green: syntax.string,
     yellow: syntax.type, blue: syntax.function, magenta: syntax.keyword,
     cyan: syntax.operator, white: colors.text,
@@ -142,8 +143,6 @@ export default function Terminal({ id, isActive, shell, cwd, onClick, onTitleCha
         backgroundColor: 'var(--terminal)',
         padding: '8px',
         boxSizing: 'border-box',
-        opacity: isActive ? 1.0 : 0.6,
-        transition: 'opacity 0.2s',
         cursor: 'text'
       }}
     />

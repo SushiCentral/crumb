@@ -1,0 +1,1385 @@
+{
+  "schemaVersion": 1,
+  "fixture": {
+    "path": "tests/fixtures/vim-flash-python.py",
+    "sha256": "f91deb92e95721f814703ad823f0ece566fd7caa172f2081bcf98fc64e5ae0cf",
+    "utf8Bytes": 1445,
+    "utf16Length": 1443,
+    "lineCount": 41,
+    "lineEnding": "LF",
+    "trailingNewline": true,
+    "viewport": {
+      "startLine": 1,
+      "endLine": 33,
+      "startOffset": 0,
+      "endOffset": 1223,
+      "offsetEncoding": "utf-16-code-units",
+      "endOffsetIsExclusive": true,
+      "nativeNvimByteEndOffset": 1225,
+      "nativeNvimCoordinatesNote": "Nvim byte offsets are +2 after the U+271A character on line 24. Use UTF-16 offsets for Crumb/CodeMirror."
+    },
+    "padding": {
+      "startLine": 34,
+      "reason": "Collision padding intentionally outside viewport; reproduces flash case-insensitive skip set for lowercase time (Timedelta/times) and t-continuation collisions."
+    },
+    "origin": {
+      "documentSource": "First 33 lines of /home/ray/Projects/Stockout_Shield/app.py, plus synthetic collision padding lines 34-41.",
+      "observedCrumbScreenshot": "/home/ray/Pictures/screenshot-2026-10-28_20-39-23.png"
+    }
+  },
+  "oracle": {
+    "source": "folke/flash.nvim",
+    "flashCommit": "b6346946d10d07998efee029fb0f7a593806d0cd",
+    "neovim": "Neovim 0.12.6+v0.12.6",
+    "installation": "/home/ray/.local/share/nvim/lazy/flash.nvim",
+    "independentOfCrumb": true,
+    "method": "Read live flash.nvim State results/labels after each query prefix in a native Neovim UI; not generated from Crumb code.",
+    "userConfigProvenance": {
+      "flashOverridesInUserConfig": false,
+      "lazyVimFlashOpts": "{}",
+      "ignorecase": true,
+      "smartcase": true,
+      "lockFile": "/home/ray/.config/nvim/lazy-lock.json"
+    },
+    "options": {
+      "current": true,
+      "distance": true,
+      "incremental": false,
+      "ignorecase": true,
+      "smartcase": true,
+      "labels": "asdfghjklqwertyuiopzxcvbnm",
+      "multiWindow": true,
+      "mode": "exact",
+      "uppercase": true,
+      "reuse": "lowercase"
+    },
+    "activation": {
+      "mode": "normal",
+      "cursorOffset": 0,
+      "windowTopline": 1,
+      "windowBotline": 33,
+      "windowHeight": 33,
+      "entryCommand": "require(\"flash\").jump()"
+    }
+  },
+  "semanticsUnderTest": {
+    "matchMode": "exact literal Vim search honoring ignorecase/smartcase",
+    "collisionFiltering": "Remove every label character c for which the query is immediately followed by c anywhere in the buffer; when ignorecase is on compare case-insensitively and remove both cases.",
+    "labelOrder": "Current window first; within the current window sort by distance from the live cursor (non-incremental cursor = activation cursor), then position.",
+    "stableReuse": "label.reuse=\"lowercase\": store/restore only lowercase labels at the same start position; uppercase labels are never reused on a later query.",
+    "target": "Next match strictly after activation cursor, wrapping; used by Enter."
+  },
+  "anchors": {
+    "importTime": {
+      "offset": 99,
+      "line": 6,
+      "column": 7,
+      "context": "import time"
+    },
+    "runtime": {
+      "offset": 1142,
+      "line": 30,
+      "column": 59,
+      "context": "ROOT/'runtime'/'stockout.db'"
+    },
+    "note": "Offsets are UTF-16 code units, matching CodeMirror. Nvim byte columns are 7 and 59; line 24 contains U+271A, so later Nvim byte offsets are +2."
+  },
+  "expectedSequence": {
+    "t": {
+      "importTime": "Q",
+      "runtime": null
+    },
+    "ti": {
+      "importTime": "d",
+      "runtime": "u"
+    },
+    "tim": {
+      "importTime": "d",
+      "runtime": "u"
+    },
+    "time": {
+      "importTime": "a",
+      "runtime": "u"
+    }
+  },
+  "traces": {
+    "t": {
+      "matchCount": 119,
+      "labeledCount": 16,
+      "targetOffset": 9,
+      "targetLabel": "g",
+      "expectedAnchorLabels": {
+        "importTime": "Q",
+        "runtime": null
+      },
+      "results": [
+        {
+          "offset": 9,
+          "endOffsetInclusive": 9,
+          "endOffsetExclusive": 10,
+          "line": 1,
+          "column": 9,
+          "byteColumn": 9,
+          "label": "g"
+        },
+        {
+          "offset": 21,
+          "endOffsetInclusive": 21,
+          "endOffsetExclusive": 22,
+          "line": 1,
+          "column": 21,
+          "byteColumn": 21,
+          "label": "j"
+        },
+        {
+          "offset": 27,
+          "endOffsetInclusive": 27,
+          "endOffsetExclusive": 28,
+          "line": 1,
+          "column": 27,
+          "byteColumn": 27,
+          "label": "k"
+        },
+        {
+          "offset": 29,
+          "endOffsetInclusive": 29,
+          "endOffsetExclusive": 30,
+          "line": 1,
+          "column": 29,
+          "byteColumn": 29,
+          "label": "q"
+        },
+        {
+          "offset": 40,
+          "endOffsetInclusive": 40,
+          "endOffsetExclusive": 41,
+          "line": 2,
+          "column": 5,
+          "byteColumn": 5,
+          "label": "p"
+        },
+        {
+          "offset": 50,
+          "endOffsetInclusive": 50,
+          "endOffsetExclusive": 51,
+          "line": 3,
+          "column": 5,
+          "byteColumn": 5,
+          "label": "z"
+        },
+        {
+          "offset": 62,
+          "endOffsetInclusive": 62,
+          "endOffsetExclusive": 63,
+          "line": 4,
+          "column": 5,
+          "byteColumn": 5,
+          "label": "x"
+        },
+        {
+          "offset": 74,
+          "endOffsetInclusive": 74,
+          "endOffsetExclusive": 75,
+          "line": 5,
+          "column": 7,
+          "byteColumn": 7,
+          "label": "n"
+        },
+        {
+          "offset": 85,
+          "endOffsetInclusive": 85,
+          "endOffsetExclusive": 86,
+          "line": 5,
+          "column": 18,
+          "byteColumn": 18,
+          "label": "G"
+        },
+        {
+          "offset": 89,
+          "endOffsetInclusive": 89,
+          "endOffsetExclusive": 90,
+          "line": 5,
+          "column": 22,
+          "byteColumn": 22,
+          "label": "J"
+        },
+        {
+          "offset": 97,
+          "endOffsetInclusive": 97,
+          "endOffsetExclusive": 98,
+          "line": 6,
+          "column": 5,
+          "byteColumn": 5,
+          "label": "K"
+        },
+        {
+          "offset": 99,
+          "endOffsetInclusive": 99,
+          "endOffsetExclusive": 100,
+          "line": 6,
+          "column": 7,
+          "byteColumn": 7,
+          "label": "Q"
+        },
+        {
+          "offset": 109,
+          "endOffsetInclusive": 109,
+          "endOffsetExclusive": 110,
+          "line": 7,
+          "column": 5,
+          "byteColumn": 5,
+          "label": "P"
+        },
+        {
+          "offset": 124,
+          "endOffsetInclusive": 124,
+          "endOffsetExclusive": 125,
+          "line": 8,
+          "column": 5,
+          "byteColumn": 5,
+          "label": "Z"
+        },
+        {
+          "offset": 144,
+          "endOffsetInclusive": 144,
+          "endOffsetExclusive": 145,
+          "line": 9,
+          "column": 5,
+          "byteColumn": 5,
+          "label": "X"
+        },
+        {
+          "offset": 149,
+          "endOffsetInclusive": 149,
+          "endOffsetExclusive": 150,
+          "line": 9,
+          "column": 10,
+          "byteColumn": 10,
+          "label": "N"
+        },
+        {
+          "offset": 172,
+          "endOffsetInclusive": 172,
+          "endOffsetExclusive": 173,
+          "line": 10,
+          "column": 5,
+          "byteColumn": 5,
+          "label": null
+        },
+        {
+          "offset": 177,
+          "endOffsetInclusive": 177,
+          "endOffsetExclusive": 178,
+          "line": 10,
+          "column": 10,
+          "byteColumn": 10,
+          "label": null
+        },
+        {
+          "offset": 192,
+          "endOffsetInclusive": 192,
+          "endOffsetExclusive": 193,
+          "line": 10,
+          "column": 25,
+          "byteColumn": 25,
+          "label": null
+        },
+        {
+          "offset": 206,
+          "endOffsetInclusive": 206,
+          "endOffsetExclusive": 207,
+          "line": 11,
+          "column": 5,
+          "byteColumn": 5,
+          "label": null
+        },
+        {
+          "offset": 209,
+          "endOffsetInclusive": 209,
+          "endOffsetExclusive": 210,
+          "line": 11,
+          "column": 8,
+          "byteColumn": 8,
+          "label": null
+        },
+        {
+          "offset": 216,
+          "endOffsetInclusive": 216,
+          "endOffsetExclusive": 217,
+          "line": 11,
+          "column": 15,
+          "byteColumn": 15,
+          "label": null
+        },
+        {
+          "offset": 222,
+          "endOffsetInclusive": 222,
+          "endOffsetExclusive": 223,
+          "line": 11,
+          "column": 21,
+          "byteColumn": 21,
+          "label": null
+        },
+        {
+          "offset": 230,
+          "endOffsetInclusive": 230,
+          "endOffsetExclusive": 231,
+          "line": 12,
+          "column": 6,
+          "byteColumn": 6,
+          "label": null
+        },
+        {
+          "offset": 236,
+          "endOffsetInclusive": 236,
+          "endOffsetExclusive": 237,
+          "line": 12,
+          "column": 12,
+          "byteColumn": 12,
+          "label": null
+        },
+        {
+          "offset": 240,
+          "endOffsetInclusive": 240,
+          "endOffsetExclusive": 241,
+          "line": 12,
+          "column": 16,
+          "byteColumn": 16,
+          "label": null
+        },
+        {
+          "offset": 248,
+          "endOffsetInclusive": 248,
+          "endOffsetExclusive": 249,
+          "line": 12,
+          "column": 24,
+          "byteColumn": 24,
+          "label": null
+        },
+        {
+          "offset": 252,
+          "endOffsetInclusive": 252,
+          "endOffsetExclusive": 253,
+          "line": 12,
+          "column": 28,
+          "byteColumn": 28,
+          "label": null
+        },
+        {
+          "offset": 256,
+          "endOffsetInclusive": 256,
+          "endOffsetExclusive": 257,
+          "line": 12,
+          "column": 32,
+          "byteColumn": 32,
+          "label": null
+        },
+        {
+          "offset": 270,
+          "endOffsetInclusive": 270,
+          "endOffsetExclusive": 271,
+          "line": 12,
+          "column": 46,
+          "byteColumn": 46,
+          "label": null
+        },
+        {
+          "offset": 273,
+          "endOffsetInclusive": 273,
+          "endOffsetExclusive": 274,
+          "line": 12,
+          "column": 49,
+          "byteColumn": 49,
+          "label": null
+        },
+        {
+          "offset": 279,
+          "endOffsetInclusive": 279,
+          "endOffsetExclusive": 280,
+          "line": 12,
+          "column": 55,
+          "byteColumn": 55,
+          "label": null
+        },
+        {
+          "offset": 305,
+          "endOffsetInclusive": 305,
+          "endOffsetExclusive": 306,
+          "line": 12,
+          "column": 81,
+          "byteColumn": 81,
+          "label": null
+        },
+        {
+          "offset": 313,
+          "endOffsetInclusive": 313,
+          "endOffsetExclusive": 314,
+          "line": 12,
+          "column": 89,
+          "byteColumn": 89,
+          "label": null
+        },
+        {
+          "offset": 327,
+          "endOffsetInclusive": 327,
+          "endOffsetExclusive": 328,
+          "line": 12,
+          "column": 103,
+          "byteColumn": 103,
+          "label": null
+        },
+        {
+          "offset": 337,
+          "endOffsetInclusive": 337,
+          "endOffsetExclusive": 338,
+          "line": 13,
+          "column": 6,
+          "byteColumn": 6,
+          "label": null
+        },
+        {
+          "offset": 343,
+          "endOffsetInclusive": 343,
+          "endOffsetExclusive": 344,
+          "line": 13,
+          "column": 12,
+          "byteColumn": 12,
+          "label": null
+        },
+        {
+          "offset": 357,
+          "endOffsetInclusive": 357,
+          "endOffsetExclusive": 358,
+          "line": 13,
+          "column": 26,
+          "byteColumn": 26,
+          "label": null
+        },
+        {
+          "offset": 377,
+          "endOffsetInclusive": 377,
+          "endOffsetExclusive": 378,
+          "line": 14,
+          "column": 6,
+          "byteColumn": 6,
+          "label": null
+        },
+        {
+          "offset": 383,
+          "endOffsetInclusive": 383,
+          "endOffsetExclusive": 384,
+          "line": 14,
+          "column": 12,
+          "byteColumn": 12,
+          "label": null
+        },
+        {
+          "offset": 392,
+          "endOffsetInclusive": 392,
+          "endOffsetExclusive": 393,
+          "line": 14,
+          "column": 21,
+          "byteColumn": 21,
+          "label": null
+        },
+        {
+          "offset": 402,
+          "endOffsetInclusive": 402,
+          "endOffsetExclusive": 403,
+          "line": 14,
+          "column": 31,
+          "byteColumn": 31,
+          "label": null
+        },
+        {
+          "offset": 411,
+          "endOffsetInclusive": 411,
+          "endOffsetExclusive": 412,
+          "line": 14,
+          "column": 40,
+          "byteColumn": 40,
+          "label": null
+        },
+        {
+          "offset": 419,
+          "endOffsetInclusive": 419,
+          "endOffsetExclusive": 420,
+          "line": 15,
+          "column": 6,
+          "byteColumn": 6,
+          "label": null
+        },
+        {
+          "offset": 425,
+          "endOffsetInclusive": 425,
+          "endOffsetExclusive": 426,
+          "line": 15,
+          "column": 12,
+          "byteColumn": 12,
+          "label": null
+        },
+        {
+          "offset": 432,
+          "endOffsetInclusive": 432,
+          "endOffsetExclusive": 433,
+          "line": 15,
+          "column": 19,
+          "byteColumn": 19,
+          "label": null
+        },
+        {
+          "offset": 442,
+          "endOffsetInclusive": 442,
+          "endOffsetExclusive": 443,
+          "line": 15,
+          "column": 29,
+          "byteColumn": 29,
+          "label": null
+        },
+        {
+          "offset": 450,
+          "endOffsetInclusive": 450,
+          "endOffsetExclusive": 451,
+          "line": 15,
+          "column": 37,
+          "byteColumn": 37,
+          "label": null
+        },
+        {
+          "offset": 457,
+          "endOffsetInclusive": 457,
+          "endOffsetExclusive": 458,
+          "line": 15,
+          "column": 44,
+          "byteColumn": 44,
+          "label": null
+        },
+        {
+          "offset": 469,
+          "endOffsetInclusive": 469,
+          "endOffsetExclusive": 470,
+          "line": 15,
+          "column": 56,
+          "byteColumn": 56,
+          "label": null
+        },
+        {
+          "offset": 505,
+          "endOffsetInclusive": 505,
+          "endOffsetExclusive": 506,
+          "line": 15,
+          "column": 92,
+          "byteColumn": 92,
+          "label": null
+        },
+        {
+          "offset": 517,
+          "endOffsetInclusive": 517,
+          "endOffsetExclusive": 518,
+          "line": 16,
+          "column": 6,
+          "byteColumn": 6,
+          "label": null
+        },
+        {
+          "offset": 523,
+          "endOffsetInclusive": 523,
+          "endOffsetExclusive": 524,
+          "line": 16,
+          "column": 12,
+          "byteColumn": 12,
+          "label": null
+        },
+        {
+          "offset": 539,
+          "endOffsetInclusive": 539,
+          "endOffsetExclusive": 540,
+          "line": 16,
+          "column": 28,
+          "byteColumn": 28,
+          "label": null
+        },
+        {
+          "offset": 547,
+          "endOffsetInclusive": 547,
+          "endOffsetExclusive": 548,
+          "line": 16,
+          "column": 36,
+          "byteColumn": 36,
+          "label": null
+        },
+        {
+          "offset": 567,
+          "endOffsetInclusive": 567,
+          "endOffsetExclusive": 568,
+          "line": 17,
+          "column": 6,
+          "byteColumn": 6,
+          "label": null
+        },
+        {
+          "offset": 573,
+          "endOffsetInclusive": 573,
+          "endOffsetExclusive": 574,
+          "line": 17,
+          "column": 12,
+          "byteColumn": 12,
+          "label": null
+        },
+        {
+          "offset": 576,
+          "endOffsetInclusive": 576,
+          "endOffsetExclusive": 577,
+          "line": 17,
+          "column": 15,
+          "byteColumn": 15,
+          "label": null
+        },
+        {
+          "offset": 588,
+          "endOffsetInclusive": 588,
+          "endOffsetExclusive": 589,
+          "line": 17,
+          "column": 27,
+          "byteColumn": 27,
+          "label": null
+        },
+        {
+          "offset": 591,
+          "endOffsetInclusive": 591,
+          "endOffsetExclusive": 592,
+          "line": 17,
+          "column": 30,
+          "byteColumn": 30,
+          "label": null
+        },
+        {
+          "offset": 602,
+          "endOffsetInclusive": 602,
+          "endOffsetExclusive": 603,
+          "line": 18,
+          "column": 6,
+          "byteColumn": 6,
+          "label": null
+        },
+        {
+          "offset": 608,
+          "endOffsetInclusive": 608,
+          "endOffsetExclusive": 609,
+          "line": 18,
+          "column": 12,
+          "byteColumn": 12,
+          "label": null
+        },
+        {
+          "offset": 615,
+          "endOffsetInclusive": 615,
+          "endOffsetExclusive": 616,
+          "line": 18,
+          "column": 19,
+          "byteColumn": 19,
+          "label": null
+        },
+        {
+          "offset": 626,
+          "endOffsetInclusive": 626,
+          "endOffsetExclusive": 627,
+          "line": 19,
+          "column": 6,
+          "byteColumn": 6,
+          "label": null
+        },
+        {
+          "offset": 632,
+          "endOffsetInclusive": 632,
+          "endOffsetExclusive": 633,
+          "line": 19,
+          "column": 12,
+          "byteColumn": 12,
+          "label": null
+        },
+        {
+          "offset": 639,
+          "endOffsetInclusive": 639,
+          "endOffsetExclusive": 640,
+          "line": 19,
+          "column": 19,
+          "byteColumn": 19,
+          "label": null
+        },
+        {
+          "offset": 667,
+          "endOffsetInclusive": 667,
+          "endOffsetExclusive": 668,
+          "line": 20,
+          "column": 6,
+          "byteColumn": 6,
+          "label": null
+        },
+        {
+          "offset": 673,
+          "endOffsetInclusive": 673,
+          "endOffsetExclusive": 674,
+          "line": 20,
+          "column": 12,
+          "byteColumn": 12,
+          "label": null
+        },
+        {
+          "offset": 689,
+          "endOffsetInclusive": 689,
+          "endOffsetExclusive": 690,
+          "line": 20,
+          "column": 28,
+          "byteColumn": 28,
+          "label": null
+        },
+        {
+          "offset": 691,
+          "endOffsetInclusive": 691,
+          "endOffsetExclusive": 692,
+          "line": 20,
+          "column": 30,
+          "byteColumn": 30,
+          "label": null
+        },
+        {
+          "offset": 703,
+          "endOffsetInclusive": 703,
+          "endOffsetExclusive": 704,
+          "line": 20,
+          "column": 42,
+          "byteColumn": 42,
+          "label": null
+        },
+        {
+          "offset": 709,
+          "endOffsetInclusive": 709,
+          "endOffsetExclusive": 710,
+          "line": 20,
+          "column": 48,
+          "byteColumn": 48,
+          "label": null
+        },
+        {
+          "offset": 711,
+          "endOffsetInclusive": 711,
+          "endOffsetExclusive": 712,
+          "line": 20,
+          "column": 50,
+          "byteColumn": 50,
+          "label": null
+        },
+        {
+          "offset": 720,
+          "endOffsetInclusive": 720,
+          "endOffsetExclusive": 721,
+          "line": 21,
+          "column": 6,
+          "byteColumn": 6,
+          "label": null
+        },
+        {
+          "offset": 726,
+          "endOffsetInclusive": 726,
+          "endOffsetExclusive": 727,
+          "line": 21,
+          "column": 12,
+          "byteColumn": 12,
+          "label": null
+        },
+        {
+          "offset": 734,
+          "endOffsetInclusive": 734,
+          "endOffsetExclusive": 735,
+          "line": 21,
+          "column": 20,
+          "byteColumn": 20,
+          "label": null
+        },
+        {
+          "offset": 744,
+          "endOffsetInclusive": 744,
+          "endOffsetExclusive": 745,
+          "line": 21,
+          "column": 30,
+          "byteColumn": 30,
+          "label": null
+        },
+        {
+          "offset": 780,
+          "endOffsetInclusive": 780,
+          "endOffsetExclusive": 781,
+          "line": 21,
+          "column": 66,
+          "byteColumn": 66,
+          "label": null
+        },
+        {
+          "offset": 786,
+          "endOffsetInclusive": 786,
+          "endOffsetExclusive": 787,
+          "line": 23,
+          "column": 3,
+          "byteColumn": 3,
+          "label": null
+        },
+        {
+          "offset": 790,
+          "endOffsetInclusive": 790,
+          "endOffsetExclusive": 791,
+          "line": 23,
+          "column": 7,
+          "byteColumn": 7,
+          "label": null
+        },
+        {
+          "offset": 808,
+          "endOffsetInclusive": 808,
+          "endOffsetExclusive": 809,
+          "line": 23,
+          "column": 25,
+          "byteColumn": 25,
+          "label": null
+        },
+        {
+          "offset": 811,
+          "endOffsetInclusive": 811,
+          "endOffsetExclusive": 812,
+          "line": 24,
+          "column": 1,
+          "byteColumn": 1,
+          "label": null
+        },
+        {
+          "offset": 815,
+          "endOffsetInclusive": 815,
+          "endOffsetExclusive": 816,
+          "line": 24,
+          "column": 5,
+          "byteColumn": 5,
+          "label": null
+        },
+        {
+          "offset": 834,
+          "endOffsetInclusive": 834,
+          "endOffsetExclusive": 835,
+          "line": 24,
+          "column": 24,
+          "byteColumn": 24,
+          "label": null
+        },
+        {
+          "offset": 836,
+          "endOffsetInclusive": 836,
+          "endOffsetExclusive": 837,
+          "line": 24,
+          "column": 26,
+          "byteColumn": 26,
+          "label": null
+        },
+        {
+          "offset": 842,
+          "endOffsetInclusive": 842,
+          "endOffsetExclusive": 843,
+          "line": 24,
+          "column": 32,
+          "byteColumn": 32,
+          "label": null
+        },
+        {
+          "offset": 848,
+          "endOffsetInclusive": 848,
+          "endOffsetExclusive": 849,
+          "line": 24,
+          "column": 38,
+          "byteColumn": 38,
+          "label": null
+        },
+        {
+          "offset": 905,
+          "endOffsetInclusive": 905,
+          "endOffsetExclusive": 906,
+          "line": 24,
+          "column": 95,
+          "byteColumn": 97,
+          "label": null
+        },
+        {
+          "offset": 917,
+          "endOffsetInclusive": 917,
+          "endOffsetExclusive": 918,
+          "line": 24,
+          "column": 107,
+          "byteColumn": 109,
+          "label": null
+        },
+        {
+          "offset": 931,
+          "endOffsetInclusive": 931,
+          "endOffsetExclusive": 932,
+          "line": 24,
+          "column": 121,
+          "byteColumn": 123,
+          "label": null
+        },
+        {
+          "offset": 933,
+          "endOffsetInclusive": 933,
+          "endOffsetExclusive": 934,
+          "line": 24,
+          "column": 123,
+          "byteColumn": 125,
+          "label": null
+        },
+        {
+          "offset": 939,
+          "endOffsetInclusive": 939,
+          "endOffsetExclusive": 940,
+          "line": 24,
+          "column": 129,
+          "byteColumn": 131,
+          "label": null
+        },
+        {
+          "offset": 945,
+          "endOffsetInclusive": 945,
+          "endOffsetExclusive": 946,
+          "line": 25,
+          "column": 1,
+          "byteColumn": 1,
+          "label": null
+        },
+        {
+          "offset": 959,
+          "endOffsetInclusive": 959,
+          "endOffsetExclusive": 960,
+          "line": 25,
+          "column": 15,
+          "byteColumn": 15,
+          "label": null
+        },
+        {
+          "offset": 971,
+          "endOffsetInclusive": 971,
+          "endOffsetExclusive": 972,
+          "line": 25,
+          "column": 27,
+          "byteColumn": 27,
+          "label": null
+        },
+        {
+          "offset": 975,
+          "endOffsetInclusive": 975,
+          "endOffsetExclusive": 976,
+          "line": 25,
+          "column": 31,
+          "byteColumn": 31,
+          "label": null
+        },
+        {
+          "offset": 977,
+          "endOffsetInclusive": 977,
+          "endOffsetExclusive": 978,
+          "line": 25,
+          "column": 33,
+          "byteColumn": 33,
+          "label": null
+        },
+        {
+          "offset": 1001,
+          "endOffsetInclusive": 1001,
+          "endOffsetExclusive": 1002,
+          "line": 25,
+          "column": 57,
+          "byteColumn": 57,
+          "label": null
+        },
+        {
+          "offset": 1004,
+          "endOffsetInclusive": 1004,
+          "endOffsetExclusive": 1005,
+          "line": 25,
+          "column": 60,
+          "byteColumn": 60,
+          "label": null
+        },
+        {
+          "offset": 1014,
+          "endOffsetInclusive": 1014,
+          "endOffsetExclusive": 1015,
+          "line": 25,
+          "column": 70,
+          "byteColumn": 70,
+          "label": null
+        },
+        {
+          "offset": 1035,
+          "endOffsetInclusive": 1035,
+          "endOffsetExclusive": 1036,
+          "line": 25,
+          "column": 91,
+          "byteColumn": 91,
+          "label": null
+        },
+        {
+          "offset": 1039,
+          "endOffsetInclusive": 1039,
+          "endOffsetExclusive": 1040,
+          "line": 25,
+          "column": 95,
+          "byteColumn": 95,
+          "label": null
+        },
+        {
+          "offset": 1049,
+          "endOffsetInclusive": 1049,
+          "endOffsetExclusive": 1050,
+          "line": 28,
+          "column": 2,
+          "byteColumn": 2,
+          "label": null
+        },
+        {
+          "offset": 1072,
+          "endOffsetInclusive": 1072,
+          "endOffsetExclusive": 1073,
+          "line": 29,
+          "column": 6,
+          "byteColumn": 6,
+          "label": null
+        },
+        {
+          "offset": 1075,
+          "endOffsetInclusive": 1075,
+          "endOffsetExclusive": 1076,
+          "line": 29,
+          "column": 9,
+          "byteColumn": 9,
+          "label": null
+        },
+        {
+          "offset": 1089,
+          "endOffsetInclusive": 1089,
+          "endOffsetExclusive": 1090,
+          "line": 30,
+          "column": 6,
+          "byteColumn": 6,
+          "label": null
+        },
+        {
+          "offset": 1095,
+          "endOffsetInclusive": 1095,
+          "endOffsetExclusive": 1096,
+          "line": 30,
+          "column": 12,
+          "byteColumn": 12,
+          "label": null
+        },
+        {
+          "offset": 1113,
+          "endOffsetInclusive": 1113,
+          "endOffsetExclusive": 1114,
+          "line": 30,
+          "column": 30,
+          "byteColumn": 30,
+          "label": null
+        },
+        {
+          "offset": 1117,
+          "endOffsetInclusive": 1117,
+          "endOffsetExclusive": 1118,
+          "line": 30,
+          "column": 34,
+          "byteColumn": 34,
+          "label": null
+        },
+        {
+          "offset": 1123,
+          "endOffsetInclusive": 1123,
+          "endOffsetExclusive": 1124,
+          "line": 30,
+          "column": 40,
+          "byteColumn": 40,
+          "label": null
+        },
+        {
+          "offset": 1130,
+          "endOffsetInclusive": 1130,
+          "endOffsetExclusive": 1131,
+          "line": 30,
+          "column": 47,
+          "byteColumn": 47,
+          "label": null
+        },
+        {
+          "offset": 1136,
+          "endOffsetInclusive": 1136,
+          "endOffsetExclusive": 1137,
+          "line": 30,
+          "column": 53,
+          "byteColumn": 53,
+          "label": null
+        },
+        {
+          "offset": 1142,
+          "endOffsetInclusive": 1142,
+          "endOffsetExclusive": 1143,
+          "line": 30,
+          "column": 59,
+          "byteColumn": 59,
+          "label": null
+        },
+        {
+          "offset": 1150,
+          "endOffsetInclusive": 1150,
+          "endOffsetExclusive": 1151,
+          "line": 30,
+          "column": 67,
+          "byteColumn": 67,
+          "label": null
+        },
+        {
+          "offset": 1156,
+          "endOffsetInclusive": 1156,
+          "endOffsetExclusive": 1157,
+          "line": 30,
+          "column": 73,
+          "byteColumn": 73,
+          "label": null
+        },
+        {
+          "offset": 1168,
+          "endOffsetInclusive": 1168,
+          "endOffsetExclusive": 1169,
+          "line": 32,
+          "column": 2,
+          "byteColumn": 2,
+          "label": null
+        },
+        {
+          "offset": 1178,
+          "endOffsetInclusive": 1178,
+          "endOffsetExclusive": 1179,
+          "line": 32,
+          "column": 12,
+          "byteColumn": 12,
+          "label": null
+        },
+        {
+          "offset": 1206,
+          "endOffsetInclusive": 1206,
+          "endOffsetExclusive": 1207,
+          "line": 33,
+          "column": 5,
+          "byteColumn": 5,
+          "label": null
+        },
+        {
+          "offset": 1209,
+          "endOffsetInclusive": 1209,
+          "endOffsetExclusive": 1210,
+          "line": 33,
+          "column": 8,
+          "byteColumn": 8,
+          "label": null
+        }
+      ]
+    },
+    "ti": {
+      "matchCount": 10,
+      "labeledCount": 10,
+      "targetOffset": 29,
+      "targetLabel": "q",
+      "expectedAnchorLabels": {
+        "importTime": "d",
+        "runtime": "u"
+      },
+      "results": [
+        {
+          "offset": 29,
+          "endOffsetInclusive": 30,
+          "endOffsetExclusive": 31,
+          "line": 1,
+          "column": 29,
+          "byteColumn": 29,
+          "label": "q"
+        },
+        {
+          "offset": 99,
+          "endOffsetInclusive": 100,
+          "endOffsetExclusive": 101,
+          "line": 6,
+          "column": 7,
+          "byteColumn": 7,
+          "label": "d"
+        },
+        {
+          "offset": 392,
+          "endOffsetInclusive": 393,
+          "endOffsetExclusive": 394,
+          "line": 14,
+          "column": 21,
+          "byteColumn": 21,
+          "label": "g"
+        },
+        {
+          "offset": 505,
+          "endOffsetInclusive": 506,
+          "endOffsetExclusive": 507,
+          "line": 15,
+          "column": 92,
+          "byteColumn": 92,
+          "label": "h"
+        },
+        {
+          "offset": 703,
+          "endOffsetInclusive": 704,
+          "endOffsetExclusive": 705,
+          "line": 20,
+          "column": 42,
+          "byteColumn": 42,
+          "label": "j"
+        },
+        {
+          "offset": 734,
+          "endOffsetInclusive": 735,
+          "endOffsetExclusive": 736,
+          "line": 21,
+          "column": 20,
+          "byteColumn": 20,
+          "label": "k"
+        },
+        {
+          "offset": 834,
+          "endOffsetInclusive": 835,
+          "endOffsetExclusive": 836,
+          "line": 24,
+          "column": 24,
+          "byteColumn": 24,
+          "label": "w"
+        },
+        {
+          "offset": 917,
+          "endOffsetInclusive": 918,
+          "endOffsetExclusive": 919,
+          "line": 24,
+          "column": 107,
+          "byteColumn": 109,
+          "label": "r"
+        },
+        {
+          "offset": 977,
+          "endOffsetInclusive": 978,
+          "endOffsetExclusive": 979,
+          "line": 25,
+          "column": 33,
+          "byteColumn": 33,
+          "label": "y"
+        },
+        {
+          "offset": 1142,
+          "endOffsetInclusive": 1143,
+          "endOffsetExclusive": 1144,
+          "line": 30,
+          "column": 59,
+          "byteColumn": 59,
+          "label": "u"
+        }
+      ]
+    },
+    "tim": {
+      "matchCount": 2,
+      "labeledCount": 2,
+      "targetOffset": 99,
+      "targetLabel": "d",
+      "expectedAnchorLabels": {
+        "importTime": "d",
+        "runtime": "u"
+      },
+      "results": [
+        {
+          "offset": 99,
+          "endOffsetInclusive": 101,
+          "endOffsetExclusive": 102,
+          "line": 6,
+          "column": 7,
+          "byteColumn": 7,
+          "label": "d"
+        },
+        {
+          "offset": 1142,
+          "endOffsetInclusive": 1144,
+          "endOffsetExclusive": 1145,
+          "line": 30,
+          "column": 59,
+          "byteColumn": 59,
+          "label": "u"
+        }
+      ]
+    },
+    "time": {
+      "matchCount": 2,
+      "labeledCount": 2,
+      "targetOffset": 99,
+      "targetLabel": "a",
+      "expectedAnchorLabels": {
+        "importTime": "a",
+        "runtime": "u"
+      },
+      "results": [
+        {
+          "offset": 99,
+          "endOffsetInclusive": 102,
+          "endOffsetExclusive": 103,
+          "line": 6,
+          "column": 7,
+          "byteColumn": 7,
+          "label": "a"
+        },
+        {
+          "offset": 1142,
+          "endOffsetInclusive": 1145,
+          "endOffsetExclusive": 1146,
+          "line": 30,
+          "column": 59,
+          "byteColumn": 59,
+          "label": "u"
+        }
+      ]
+    }
+  },
+  "currentCrumbObservation": {
+    "source": "Crumb screenshot /home/ray/Pictures/screenshot-2026-10-28_20-39-23.png plus deterministic replay of src/lib/vim/jump.ts algorithm",
+    "note": "Non-oracle deviation record. Expected values above come from official flash.nvim, not this object.",
+    "byQuery": {
+      "t": {
+        "99": "F",
+        "1142": null
+      },
+      "ti": {
+        "99": "F",
+        "1142": "y"
+      },
+      "tim": {
+        "99": "F",
+        "1142": "y"
+      },
+      "time": {
+        "99": "F",
+        "1142": "y"
+      }
+    }
+  },
+  "generation": {
+    "nativeOracleOptional": true,
+    "dependencyPolicy": "No production/test-suite Neovim dependency. Native run is a manual developer oracle only.",
+    "instructions": [
+      "Use flash.nvim commit b6346946d10d07998efee029fb0f7a593806d0cd and Neovim 0.12.6.",
+      "Open tests/fixtures/vim-flash-python.py in a real UI window exactly 33 text rows high; cursor 1,0; set ignorecase and smartcase; do not use a headless nvim -l window because it is fixed at 22 rows.",
+      "Create require(\"flash.state\").new({search={incremental=false}}) and call state:update({pattern=q}) for q in t, ti, tim, time.",
+      "Record state.results offsets/end offsets/labels and state.target. Convert Nvim (row, byte-col) to UTF-16 offsets using the fixture lines; labels are coordinate-system independent.",
+      "Assert the trace never reuses uppercase labels and that final time labels are a at offset 99 and u at offset 1142."
+    ]
+  }
+}

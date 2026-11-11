@@ -1,5 +1,6 @@
-import { FileIcon, FolderIcon, KeyboardIcon, NewFileIcon, SearchIcon, SettingsIcon, TerminalIcon } from './Icons';
+import { FolderIcon, KeyboardIcon, SearchIcon, SettingsIcon, TerminalIcon } from './Icons';
 import type { RecentProject } from '../lib/recent-projects';
+import { shortcutLabel } from '../lib/platform';
 
 interface WelcomeScreenProps {
   onNewFile: () => void;
@@ -14,129 +15,89 @@ interface WelcomeScreenProps {
   onClearRecentProjects: () => void;
 }
 
-export default function WelcomeScreen({
-  onNewFile,
-  onOpenFile,
-  onOpenFolder,
-  onOpenSearch,
-  onOpenPalette,
-  onOpenSettings,
-  onToggleTerminal,
-  recentProjects,
-  onOpenProject,
-  onClearRecentProjects,
-}: WelcomeScreenProps) {
-  const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
-  const modKey = isMac ? '⌘' : 'Ctrl+';
+function projectPath(path: string) {
+  return path.replace(/^\/(?:home|Users)\/[^/]+(?=\/|$)/, '~')
+    .replace(/^[a-z]:\\Users\\[^\\]+(?=\\|$)/i, '~');
+}
 
+function lastOpenedLabel(date: Date) {
+  if (!Number.isFinite(date.getTime())) return 'Recently';
+  const today = new Date();
+  if (date.toDateString() === today.toDateString()) return 'Today';
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return date.toLocaleDateString(undefined, {
+    month: 'short', day: 'numeric', year: date.getFullYear() !== today.getFullYear() ? 'numeric' : undefined,
+  });
+}
+
+export default function WelcomeScreen({
+  onNewFile, onOpenFile, onOpenFolder, onOpenSearch, onOpenPalette,
+  onOpenSettings, onToggleTerminal, recentProjects, onOpenProject, onClearRecentProjects,
+}: WelcomeScreenProps) {
   return (
     <div className="welcome-screen">
       <div className="welcome-container">
         <header className="welcome-header">
-          <h1 className="welcome-title">Crumb</h1>
-          <p className="welcome-subtitle">Pick up where you left off.</p>
+          <div className="welcome-intro">
+            <h1 className="welcome-title">Crumb</h1>
+            <p className="welcome-subtitle">{recentProjects.length ? 'Pick up where you left off.' : 'A fresh start for your next project.'}</p>
+          </div>
+          <div className="welcome-start" aria-label="Start working">
+            <button className="welcome-open-folder" onClick={onOpenFolder}>
+              <FolderIcon width={18} height={18} />Open folder…
+            </button>
+            <div className="welcome-file-actions">
+              <button onClick={onNewFile} title={`New file (${shortcutLabel('N')})`}>New file</button>
+              <button onClick={() => onOpenFile()} title={`Open file (${shortcutLabel('O')})`}>Open file…</button>
+            </div>
+          </div>
         </header>
 
         <div className="welcome-grid">
-          <section className="welcome-card welcome-projects" aria-label="Recent projects">
-            <div className="welcome-card-header">
-              <h2 className="welcome-card-title">Recent projects</h2>
-              {recentProjects.length > 0 && <button className="welcome-clear-btn" onClick={onClearRecentProjects} title="Clear recent projects">Clear</button>}
+          <section className="welcome-projects" aria-label="Recent projects">
+            <div className="welcome-section-header">
+              <h2>Recent projects</h2>
+              {recentProjects.length > 0 && <button className="welcome-clear-btn" onClick={onClearRecentProjects} title="Clear recent project history">Clear</button>}
             </div>
             {recentProjects.length === 0 ? (
               <div className="welcome-empty-recent">
-                <FolderIcon width={28} height={28} />
                 <p>No recent projects yet</p>
-                <small>Open a folder to start a project. It will appear here next time.</small>
-                <button className="welcome-open-project" onClick={onOpenFolder}>Open Folder…</button>
+                <span>Open a folder to get started. Your recent projects will appear here next time.</span>
               </div>
             ) : (
               <div className="welcome-recent-list">
-                {recentProjects.map(item => (
-                  <button key={item.path} className="welcome-recent-item" onClick={() => onOpenProject(item.path)} title={item.path}>
-                    <FolderIcon width={20} height={20} className="recent-icon" />
-                    <span className="recent-project-details"><span className="recent-name">{item.name}</span><span className="recent-path">{item.path}</span></span>
-                  </button>
-                ))}
+                {recentProjects.map(item => {
+                  const openedAt = new Date(item.lastOpened);
+                  const validDate = Number.isFinite(openedAt.getTime());
+                  return <button key={item.path} className="welcome-recent-item" onClick={() => onOpenProject(item.path)} title={item.path}>
+                    <span className="recent-project-initial" aria-hidden="true">{Array.from(item.name.trim())[0]?.toLocaleUpperCase() || <FolderIcon />}</span>
+                    <span className="recent-project-details"><span className="recent-name">{item.name}</span><span className="recent-path">{projectPath(item.path)}</span></span>
+                    <time className="recent-opened" dateTime={validDate ? openedAt.toISOString() : undefined} title={validDate ? openedAt.toLocaleString() : undefined}>{lastOpenedLabel(openedAt)}</time>
+                  </button>;
+                })}
               </div>
             )}
           </section>
-          {/* Start Actions */}
-          <section className="welcome-card">
-            <h2 className="welcome-card-title">Start</h2>
+          <section className="welcome-tools" aria-label="Find your way">
+            <div className="welcome-section-header"><h2>Find your way</h2></div>
             <div className="welcome-action-list">
-              <button className="welcome-action-btn primary-action" onClick={onOpenFolder}>
-                <span className="welcome-btn-icon"><FolderIcon width={18} height={18} /></span>
-                <span className="welcome-btn-label">Open Folder…</span>
-              </button>
-              <button className="welcome-action-btn" onClick={onNewFile}>
-                <span className="welcome-btn-icon"><NewFileIcon width={18} height={18} /></span>
-                <span className="welcome-btn-label">New File</span>
-                <kbd className="welcome-shortcut">{modKey}N</kbd>
-              </button>
-
-              <button className="welcome-action-btn" onClick={() => onOpenFile()}>
-                <span className="welcome-btn-icon"><FileIcon width={18} height={18} /></span>
-                <span className="welcome-btn-label">Open File…</span>
-                <kbd className="welcome-shortcut">{modKey}O</kbd>
-              </button>
-
-              <button className="welcome-action-btn" onClick={onOpenSearch}>
-                <span className="welcome-btn-icon"><SearchIcon width={18} height={18} /></span>
-                <span className="welcome-btn-label">Find in Files</span>
-                <kbd className="welcome-shortcut">{modKey}Shift+F</kbd>
-              </button>
-
               <button className="welcome-action-btn" onClick={onToggleTerminal}>
-                <span className="welcome-btn-icon"><TerminalIcon width={18} height={18} /></span>
-                <span className="welcome-btn-label">Integrated Terminal</span>
-                <kbd className="welcome-shortcut">Ctrl+`</kbd>
+                <TerminalIcon /><span>Terminal</span><kbd>Ctrl+`</kbd>
               </button>
-
               <button className="welcome-action-btn" onClick={onOpenPalette}>
-                <span className="welcome-btn-icon"><KeyboardIcon width={18} height={18} /></span>
-                <span className="welcome-btn-label">Command Palette</span>
-                <kbd className="welcome-shortcut">{modKey}Shift+P</kbd>
+                <KeyboardIcon /><span>Command palette</span><kbd>{shortcutLabel('Shift+P')}</kbd>
               </button>
-
+              <button className="welcome-action-btn" onClick={onOpenSearch}>
+                <SearchIcon /><span>Find in files</span><kbd>Ctrl+Shift+F</kbd>
+              </button>
               <button className="welcome-action-btn" onClick={onOpenSettings}>
-                <span className="welcome-btn-icon"><SettingsIcon width={18} height={18} /></span>
-                <span className="welcome-btn-label">Editor Settings</span>
+                <SettingsIcon /><span>Editor settings</span><kbd>{shortcutLabel(',')}</kbd>
               </button>
             </div>
           </section>
-
         </div>
-
-        {/* Shortcuts Footer */}
-        <footer className="welcome-footer">
-          <div className="welcome-shortcuts-bar">
-            <div className="shortcut-pill">
-              <span className="shortcut-key">{modKey}P</span>
-              <span className="shortcut-desc">Quick Open</span>
-            </div>
-            <div className="shortcut-pill">
-              <span className="shortcut-key">{modKey}B</span>
-              <span className="shortcut-desc">Toggle Explorer</span>
-            </div>
-            <div className="shortcut-pill">
-              <span className="shortcut-key">{modKey}J</span>
-              <span className="shortcut-desc">Toggle Panel</span>
-            </div>
-            <div className="shortcut-pill">
-              <span className="shortcut-key">Ctrl+`</span>
-              <span className="shortcut-desc">Focus Terminal</span>
-            </div>
-            <div className="shortcut-pill">
-              <span className="shortcut-key">{modKey}S</span>
-              <span className="shortcut-desc">Save File</span>
-            </div>
-            <div className="shortcut-pill">
-              <span className="shortcut-key">{modKey}W</span>
-              <span className="shortcut-desc">Close Tab</span>
-            </div>
-          </div>
-        </footer>
       </div>
     </div>
   );

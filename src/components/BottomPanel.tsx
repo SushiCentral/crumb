@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import Terminal from './Terminal';
 import OutputPanel from './OutputPanel';
@@ -60,7 +60,6 @@ interface BottomPanelProps {
   fontFamily: string;
   focusRequest: number;
   workingDirectory: string | null;
-  openTerminalRequest: { path: string; sequence: number } | null;
 }
 
 interface TerminalInstance {
@@ -75,21 +74,19 @@ interface TerminalGroup {
   activeTerminalId: string;
 }
 
-export default function BottomPanel({ isOpen, clearPromptOnStart, onClose, onActiveSessionChange, theme, fontSize, fontFamily, focusRequest, workingDirectory, openTerminalRequest }: BottomPanelProps) {
+export default function BottomPanel({ isOpen, clearPromptOnStart, onClose, onActiveSessionChange, theme, fontSize, fontFamily, focusRequest, workingDirectory }: BottomPanelProps) {
   const [activeTab, setActiveTab] = useState<'terminal' | 'output' | 'problems'>('terminal');
   
-  // Terminal Multiplexing State - Initialized lazily to avoid Date clock drifts in strict mode
-  const [groups, setGroups] = useState<TerminalGroup[]>(() => {
-    const termId = crypto.randomUUID();
-    return [{ id: crypto.randomUUID(), terminals: [{ id: termId, cwd: workingDirectory }], activeTerminalId: termId }];
-  });
-  const [activeGroupId, setActiveGroupId] = useState<string>(() => groups[0]?.id ?? '');
+  // Terminal Multiplexing State. Groups are created lazily when the panel is
+  // first opened so a hidden panel never spawns a PTY. Closing the panel keeps
+  // the existing groups alive, preserving the session when it is reopened.
+  const [groups, setGroups] = useState<TerminalGroup[]>([]);
+  const [activeGroupId, setActiveGroupId] = useState<string>('');
   const [titles, setTitles] = useState<Record<string, string>>({});
 
   const [availableShells, setAvailableShells] = useState<string[]>([]);
   const [isShellDropdownOpen, setIsShellDropdownOpen] = useState(false);
   const [sessionIds, setSessionIds] = useState<Record<string, string>>({});
-  const lastOpenRequestRef = useRef<number | null>(null);
 
   useEffect(() => {
     const group = groups.find(g => g.id === activeGroupId);
@@ -130,13 +127,6 @@ export default function BottomPanel({ isOpen, clearPromptOnStart, onClose, onAct
     }]);
     setActiveGroupId(newGroupId);
   };
-
-  useEffect(() => {
-    if (!openTerminalRequest || lastOpenRequestRef.current === openTerminalRequest.sequence) return;
-    lastOpenRequestRef.current = openTerminalRequest.sequence;
-    handleNewTerminal(undefined, openTerminalRequest.path);
-    setActiveTab('terminal');
-  }, [openTerminalRequest]);
 
   const handleSplitTerminal = (shell?: string) => {
     const newTermId = crypto.randomUUID();
@@ -271,7 +261,7 @@ export default function BottomPanel({ isOpen, clearPromptOnStart, onClose, onAct
         <button 
           className="icon-btn" 
           onClick={onClose}
-          title="Close Panel (⌘J / Ctrl+J)"
+          title="Close panel (Ctrl+`)"
           style={{ marginLeft: activeTab === 'terminal' ? '0' : '8px' }}
         >
           <CloseIcon />
